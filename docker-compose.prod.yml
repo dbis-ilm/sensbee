@@ -1,0 +1,39 @@
+# This docker compose file is intended to be used for production
+
+services:  # Define the services to run
+  postgres:  # PostgreSQL service
+    image: postgres:17-alpine  # Use the PostgreSQL image from Docker Hub
+    container_name: postgres  # Assign a name to the container
+    restart: unless-stopped
+    environment:  # Set environment variables for PostgreSQL
+      POSTGRES_USER: ${PSQL_USER}
+      POSTGRES_PASSWORD: ${PSQL_PASSWORD}
+      POSTGRES_DB: ${PSQL_DATABASE}
+    volumes:  # Create a volume to store PostgreSQL data
+      - postgres:/var/lib/postgresql/data
+      # Start script for creating the database.
+      - ./create-db.sql:/docker-entrypoint-initdb.d/create_database.sql
+    healthcheck:  # Define a health check for the container
+      test: ["CMD", "pg_isready", "-h", "postgres", "-U", "${PSQL_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:  # Connect the container to a network
+      - rust_app_network
+
+  sensbee:
+    container_name: sensbee
+    image: sensbee
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - rust_app_network
+    ports:
+      - 8080:8080
+
+volumes:  # Define named volumes for data storage
+  postgres:
+
+networks:  # Define a custom network for the containers
+  rust_app_network:

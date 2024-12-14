@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sensor_schema WHERE sensor_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa970ccfcb7e52ee033f3b9fd0612dd3c5752a99ef80af90500c2994594ed6f5"
+}

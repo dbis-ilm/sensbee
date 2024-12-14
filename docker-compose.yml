@@ -1,0 +1,66 @@
+# This docker compose file is intended to be used for development 
+# Simply running 
+#   docker compose up -d 
+# should bring up all relevant services
+#
+# NOTE: The Dockerfile uses your local rust installation!
+
+services:  # Define the services to run
+  postgres:  # PostgreSQL service
+    image: postgres:17-alpine  # Use the PostgreSQL image from Docker Hub
+    container_name: postgres  # Assign a name to the container
+    profiles:
+      - precompile
+      - runtime
+    environment:  # Set environment variables for PostgreSQL
+      POSTGRES_USER: ${PSQL_USER}
+      POSTGRES_PASSWORD: ${PSQL_PASSWORD}
+      POSTGRES_DB: ${PSQL_DATABASE}
+    volumes:  # Create a volume to store PostgreSQL data
+      - postgres:/var/lib/postgresql/data
+      # Start script for creating the database.
+      - ./create-db.sql:/docker-entrypoint-initdb.d/create_database.sql
+    healthcheck:  # Define a health check for the container
+      test: ["CMD", "pg_isready", "-h", "postgres", "-U", "${PSQL_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    network_mode: host
+
+  pgadmin:  # pgAdmin service
+    image: dpage/pgadmin4  # Use the pgAdmin image from Docker Hub
+    profiles:
+      - precompile
+      - runtime
+    container_name: pgadmin  # Assign a name to the container
+    environment:  # Set environment variables for pgAdmin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_LISTEN_PORT: ${PGADMIN_LISTEN_PORT}
+    volumes:  # Create a volume to store pgAdmin data
+      - pgadmin-data:/var/lib/pgadmin
+    restart: always  # Restart the container if it stops
+    depends_on:  # Specify that this service depends on the PostgreSQL service
+      - postgres
+    network_mode: host
+
+  sensbee:
+    container_name: sensbee
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    profiles:
+      - runtime
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    network_mode: host
+
+volumes:  # Define named volumes for data storage
+  postgres:
+  pgadmin-data:
+
+

@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "sensor_mgmt",
+    "server",
+    "cli"
+]
+
+resolver = "2"

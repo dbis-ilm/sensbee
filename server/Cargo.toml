@@ -1,0 +1,15 @@
+[package]
+name = "sb_srv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sensor_mgmt = { path = "../sensor_mgmt" }
+
+actix-web = "4"
+sqlx = { version = "0.8", features = ["runtime-async-std", "tls-native-tls", "migrate", "json", "postgres", "time", "chrono", "uuid" ] }
+env_logger = "0.10"
+dotenvy = "0.15.7"
+actix-cors = "0.7.0"
+utoipa = { version = "5.2.0", features = ["chrono", "actix_extras"] }
+utoipa-swagger-ui = { version = "8.0.3", features = ["actix-web"] }

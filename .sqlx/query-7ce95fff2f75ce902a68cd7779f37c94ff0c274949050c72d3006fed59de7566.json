@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    UPDATE sensor \n    SET publisher = $1, consumer = $2\n    WHERE id = $3\n    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ce95fff2f75ce902a68cd7779f37c94ff0c274949050c72d3006fed59de7566"
+}
