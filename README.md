@@ -1,11 +1,11 @@
-# SensBee - Sensor Data Backend Database
+# SensBee - Sensor Data Backend
 
 SensBee is a database backend for Smart City and IoT applications. To this end, SensBee provides the ability to register sensors and upload measurement data for these sensors, or download the current values, a range of data or all data. These functions are accessible through a REST interface.
 Access rights (read data, write data) to sensors are managed by roles, that can be created and assigned to users. To access non-public data, designated API keys are required, which can be created individually for each accessible sensor.
 
 Metadata and measurement data are stored in a PostgreSQL database. Each sensor has its own table. Two binaries are available based on the database:
- * sb_srv: is the REST server, accessible via HTTP.
- * sb_cli: is a command line tool that accesses the database directly and supports simple administration tasks.
+* sb_srv: is the REST server, accessible via HTTP.
+* sb_cli: is a command line tool that accesses the database directly and supports simple administration tasks.
 
 ## Installation and Database Preparation
 
@@ -79,21 +79,25 @@ Additional users can then also be registered via the REST API.
 
 The API documentation is available as OpenAPI (former Swagger) service. Just point your browser at: http://localhost:8080/swagger-ui/ after starting the server.
 
-## scdb_cli
+## sb_cli
 
-`scdb_cli` is an administrative command line tool for managing users and roles. The database connection info is taken from the `.env` file (if available) or the `--db-url` option. The tool is controlled via the following commands
+`sb_cli` is an administrative command line tool for managing users and roles. The database connection info is taken from the `.env` file (if available) or the `--db-url` option. The tool is controlled via the following commands
 
-| Command      | Description                                                 | Parameter                        |
-|--------------|-------------------------------------------------------------|----------------------------------|
-| add-user     | Create a new verified user                                  | name, email, password, (--admin) |
-| list-users   | Show the list of registered users                           | -                                |
-| create-role  | Creates the given role                                      | role name                        |
-| list-roles   | List all roles in the system                                | -                                |
-| help         | Print a help message or the help of the given subcommand(s) | -                                |
+| Command       | Description                                                 | Parameter                        |
+|---------------|-------------------------------------------------------------|----------------------------------|
+| add-user      | Create a new verified user                                  | name, email, password, (--admin) |
+| delete-user   | Deletes an existing user                                    | userID                           |
+| list-users    | Show the list of registered users                           | -                                |
+| create-role   | Creates the given role                                      | roleName                         |
+| delete-role   | Deletes an existing role                                    | roleName                         | 
+| list-roles    | List all roles in the system                                | -                                |
+| assign-role   | Assigns a role to a user                                    | roleName, userID                 |
+| revoke-role   | Revokes a role from a user                                  | roleName, userID                 |
+| help          | Print a help message or the help of the given subcommand(s) | -                                |
 
 ## Tutorial
 
-The following example shows the setup of an initial SensBee instance, the registration of sensors as well as upload and download of data. 
+The following example shows the setup of an initial SensBee instance, the registration of sensors as well as upload and download of data.
 For this example we assume a database with applied migration scripts but otherwise empty. Furthermore, the database connection is configured in an `.env` file.
 
 1. Create an admin user
@@ -178,10 +182,10 @@ With the key, uploaded data can be retrieved based on different optional conditi
 
 ```JSON
 {
-    "from": "2024-12-07T12:00:00.000Z",
-    "to": null,
-    "limit": 10,
-    "ordering": "DESC"
+  "from": "2024-12-07T12:00:00.000Z",
+  "to": null,
+  "limit": 10,
+  "ordering": "DESC"
 }
 ```
 
@@ -203,7 +207,7 @@ First, we start the database itself.
 sh> docker compose --profile precompile up -d
 ```
 
-This should start all services that are required to run during the build step of `SensBee`. If you want to run local tests the database started in the 
+This should start all services that are required to run during the build step of `SensBee`. If you want to run local tests the database started in the
 previous step will be used as well by default. The compose file uses host networking which allows a seamless development experience.
 
 Using the following command starts our server.
@@ -213,7 +217,7 @@ sh> docker compose --profile runtime up -d
 ```
 
 The `SensBee` server can be accessed via its REST API or the command line interface.
-NOTE this two steps are only required for the first time you build the `SensBee` docker image. During development, you can simply use the runtime profile 
+NOTE this two steps are only required for the first time you build the `SensBee` docker image. During development, you can simply use the runtime profile
 to bring up all services at once as the compilation step only happens if the image is not present.
 If you want to force a rebuild of the `SensBee` image run this command.
 
