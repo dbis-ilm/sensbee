@@ -66,7 +66,6 @@ pub async fn require_sensor_permission(user_id: Option<uuid::Uuid>, sensor_id: u
 
 pub fn unauthorized(error_msg: String) -> Option<HttpResponse> {
     Some(HttpResponse::Unauthorized().json(json!({
-            "status": "fail".to_string(),
-            "message": error_msg,
+            "error": error_msg,
         })))
 }

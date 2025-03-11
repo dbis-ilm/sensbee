@@ -180,13 +180,13 @@ impl SensorDataStorageStrategy for RingBufferIntervalSDS {
 pub mod tests {
     use crate::state::AppState;
     use async_std::task;
-    use serde_json::{json};
+    use serde_json::json;
     use sqlx::PgPool;
     use uuid::Uuid;
     use crate::database::sensor_db;
     use crate::features::cache;
     use crate::features::sensor_data_storage::{SensorDataStorageCfg, SensorDataStorageType};
-    use crate::handler::models::requests::{EditSensorRequest, SensorDataRequest};
+    use crate::handler::models::requests::{DataLoadRequestParams, EditSensorRequest};
     use crate::test_utils::tests::{create_test_app, create_test_sensors};
 
     fn edit_sensor_req(storage: SensorDataStorageCfg) -> EditSensorRequest {
@@ -247,7 +247,7 @@ pub mod tests {
 
         // Check if all data remains
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
         let elms = data.as_array().unwrap();
         assert_eq!(elms.len(), 15);
 
@@ -293,7 +293,7 @@ pub mod tests {
 
         // Check if only the last 10 tuples are present (according to strategy)
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
 
         let elms = data.as_array().unwrap();
 
@@ -314,7 +314,7 @@ pub mod tests {
 
         // Check if only the last 15 tuples are present (according to strategy)
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
 
         let elms = data.as_array().unwrap();
 
@@ -367,7 +367,7 @@ pub mod tests {
 
         // Check if only the last 6 tuples are present
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
 
         let elms = data.as_array().unwrap();
 
@@ -391,7 +391,7 @@ pub mod tests {
 
         // Check if only the last 12 tuples are present
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
 
         let elms = data.as_array().unwrap();
 
@@ -422,7 +422,7 @@ pub mod tests {
 
         // Check if only the last 10 tuples are present (according to strategy)
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
         let elms = data.as_array().unwrap();
         assert_eq!(elms.len(), 10);
 
@@ -438,7 +438,7 @@ pub mod tests {
         }), &state).await.unwrap();
 
         // Strategy switch should not affect previous tuples immediately
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
         let elms = data.as_array().unwrap();
         assert_eq!(elms.len(), 10);
 
@@ -449,7 +449,7 @@ pub mod tests {
 
         // Check if only the last 6 tuples are present
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
         let elms = data.as_array().unwrap();
         assert_eq!(elms.len(), 6);
 
@@ -468,7 +468,7 @@ pub mod tests {
 
         add_dummy_data(10, 27, 0, sensor_id, &state).await;
 
-        let data = sensor_db::get_data(sensor_id, SensorDataRequest { limit: None, ordering: None, from: None, to: None}, &state).await.unwrap();
+        let data = sensor_db::get_data(sensor_id, DataLoadRequestParams::default(), &state).await.unwrap();
         let elms = data.as_array().unwrap();
         assert_eq!(elms.len(), 16);
 

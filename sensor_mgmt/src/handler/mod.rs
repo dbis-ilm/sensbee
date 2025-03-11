@@ -1,6 +1,7 @@
 pub mod main_hdl;
 
 pub mod sensor_hdl;
+pub mod data_hdl;
 
 pub mod auth_hdl;
 

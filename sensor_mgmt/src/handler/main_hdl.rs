@@ -1,7 +1,8 @@
+use actix_web::http::header;
 use actix_web::{get, web, HttpResponse, Responder};
 use serde_json::json;
 use serde::Serialize;
-use crate::handler::{auth_hdl, role_hdl, sensor_hdl, user_hdl};
+use crate::handler::{auth_hdl, role_hdl, sensor_hdl, user_hdl, data_hdl};
 use crate::handler::models::responses::HealthResponse;
 
 #[utoipa::path(
@@ -9,7 +10,7 @@ use crate::handler::models::responses::HealthResponse;
     path = "/api/healthchecker",
     tag = "System",
     responses(
-        (status = 200, description= "Return I'm alife message", body = HealthResponse),
+        (status = 200, description= "Return I'm alive message", body = HealthResponse),
     )
 )]
 
@@ -20,31 +21,48 @@ async fn health_checker_handler() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {status: "success".to_string(), message: MESSAGE.to_string()})
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/",
+    tag = "System",
+    responses(
+        (status = 200, description= "Always returns `200 OK` as long as the server is running. This is useful for verifying the base URL of a REST JSON API, such as when configuring integrations in tools like Grafana."),
+    )
+)]
+
+#[get("/")]
+async fn api_base_handler() -> impl Responder {
+    HttpResponse::Ok()
+}
+
 /* ------------------------------------------------Helper ------------------------------------------------------------ */
 
 /// Sends the successful result or an error message.
 pub fn send_result<T>(result: &Result<T, anyhow::Error>) -> HttpResponse where T: Serialize {
     match result {
         Ok(res) => {
-            let data = serde_json::to_value(&res).unwrap_or_default();
+            let mut b = HttpResponse::Ok();
+            b.insert_header(header::ContentType::json());
 
+            let data = serde_json::to_value(&res).unwrap_or_default();
             if data.is_null() {
-                HttpResponse::Ok().finish()
+                b.body("{}")
             } else {
-                HttpResponse::Ok().body(data.to_string())
+                b.body(data.to_string())
             }
         }
         Err(e) => {
             eprintln!("{}", format!("{:?}", e));
             
             // Send the error - Error message should not reveal sensitive information!
-            HttpResponse::InternalServerError().json(json!({"status": "error", "message": e.to_string() }))
+            HttpResponse::InternalServerError().json(json!({ "error": e.to_string() }))
         }
     }
 }
 
 pub fn config(conf: &mut web::ServiceConfig) {
     let scope = web::scope("/api")
+        .service(api_base_handler)
         .service(health_checker_handler)
         
         .service(sensor_hdl::list_sensors_handler)
@@ -54,8 +72,9 @@ pub fn config(conf: &mut web::ServiceConfig) {
         .service(sensor_hdl::delete_sensor_handler)
         .service(sensor_hdl::create_sensor_api_key_handler)
         .service(sensor_hdl::delete_sensor_api_key_handler)
-        .service(sensor_hdl::ingest_data_handler)
-        .service(sensor_hdl::get_data_handler)
+
+        .service(data_hdl::ingest_sensor_data_handler)
+        .service(data_hdl::get_sensor_data_handler)
     
         .service(role_hdl::create_role_handler)
         .service(role_hdl::delete_role_handler)
@@ -65,6 +84,8 @@ pub fn config(conf: &mut web::ServiceConfig) {
         .service(user_hdl::register_user_handler)
         .service(user_hdl::verify_user_handler)
         .service(user_hdl::get_user_info_handler)
+        .service(user_hdl::edit_user_info_handler)
+        .service(user_hdl::edit_user_security_password_handler)
         .service(user_hdl::delete_user_handler)
         .service(user_hdl::revoke_role_handler)
         .service(user_hdl::assign_role_handler)
@@ -85,7 +106,7 @@ pub fn config(conf: &mut web::ServiceConfig) {
 #[cfg(test)]
 pub mod tests {
     use actix_http::Method;
-    use crate::state::AppState;
+    use crate::state::init_app_state;
     use actix_web::{test, App};
     use actix_web::http::StatusCode;
     use serde_json::Value;
@@ -98,7 +119,7 @@ pub mod tests {
     async fn test_health_check(pool: PgPool) {
         let (app, _) = create_test_app(pool).await;
 
-        let body = execute_request("/api/healthchecker", Method::GET,
+        let body = execute_request("/api/healthchecker", Method::GET, None,
                                 None::<Value>, None,
                                 StatusCode::OK, &app).await;
 
@@ -109,7 +130,7 @@ pub mod tests {
 
     #[sqlx::test(migrations = "../migrations")]
     async fn test_config(pool: PgPool) {
-        let state = AppState{ db: pool, jwt: JWTConfig::init() };
+        let state =  init_app_state(pool, JWTConfig::init());
 
         let app = App::new().app_data(web::Data::new(state.clone())).configure(config);
 

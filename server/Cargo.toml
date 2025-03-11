@@ -13,3 +13,4 @@ dotenvy = "0.15.7"
 actix-cors = "0.7.0"
 utoipa = { version = "5.2.0", features = ["chrono", "actix_extras"] }
 utoipa-swagger-ui = { version = "8.0.3", features = ["actix-web"] }
+compile-time = "0.2.0"

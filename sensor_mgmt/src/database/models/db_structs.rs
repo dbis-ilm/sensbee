@@ -1,3 +1,4 @@
+use derive_more::derive::Display;
 use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -35,7 +36,7 @@ impl DBOperation {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Display)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum DBOrdering {
     DEFAULT = 0,

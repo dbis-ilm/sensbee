@@ -39,6 +39,7 @@ pub struct ShortSensorInfo {
 /// The possible types of values stored in the sensor data table.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Copy, Clone, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
+#[schema(description = "NOTE: Any INT column will be bound to rust i32. Any FLOAT column will be bound to rust f64. STRING is VARCHAR(50)")]
 pub enum ColumnType {
     UNKNOWN = 0,
     INT = 1,

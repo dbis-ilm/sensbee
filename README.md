@@ -4,8 +4,8 @@ SensBee is a database backend for Smart City and IoT applications. To this end, 
 Access rights (read data, write data) to sensors are managed by roles, that can be created and assigned to users. To access non-public data, designated API keys are required, which can be created individually for each accessible sensor.
 
 Metadata and measurement data are stored in a PostgreSQL database. Each sensor has its own table. Two binaries are available based on the database:
-* sb_srv: is the REST server, accessible via HTTP.
-* sb_cli: is a command line tool that accesses the database directly and supports simple administration tasks.
+ * sb_srv: is the REST server, accessible via HTTP.
+ * sb_cli: is a command line tool that accesses the database directly and supports simple administration tasks.
 
 ## Installation and Database Preparation
 
@@ -31,12 +31,12 @@ The connection information must be entered in a `.env` file in the root director
 PSQL_DATABASE=testdb
 PSQL_USER=dev
 PSQL_PASSWORD=my_secret2
-DATABASE_URL=postgres://${PSQL_USER}:${PSQL_PASSWORD}@127.0.0.1:5432/${PSQL_DATABASE}
+DATABASE_URL=postgres://${PSQL_USER}:${PSQL_PASSWORD}@postgres:5432/${PSQL_DATABASE}
 ```
 
-Note, if you want to run unit tests later, the user needs to have superuser privileges.
+Note, if you want to run unit tests later, the user needs to have superuser privileges. Moreover, when using an external PostgreSQL instance (outside the docker container), the URL must be replaced with the correct address. For instance, a separate PostgreSQL docker container can be reached by replacing the @postgres:5432 with @localhost:5432.
 
-For authentication, we use JWT that must be provided for each API call. The JWT handling requires a public and private RSA key (Base64 encoded) which should be **exchanged** on deployment!
+For authentication, we use JWT that must be provided for each API call. The JWT handling requires a public and private RSA key (Base64 encoded) which must be **exchanged** on deployment!
 
 ## Building SensBee
 
@@ -95,9 +95,14 @@ The API documentation is available as OpenAPI (former Swagger) service. Just poi
 | revoke-role   | Revokes a role from a user                                  | roleName, userID                 |
 | help          | Print a help message or the help of the given subcommand(s) | -                                |
 
+## sbmi
+
+The SensBee management interface is a standalone web application, that offers a visual and intuitive access to the sensor and user management functionalities and can be accessed by http://localhost:8082. Internally, the sbmi calls the provided Rest API paths of the SensBee backend.
+
+
 ## Tutorial
 
-The following example shows the setup of an initial SensBee instance, the registration of sensors as well as upload and download of data.
+The following example shows the setup of an initial SensBee instance, the registration of sensors as well as upload and download of data. 
 For this example we assume a database with applied migration scripts but otherwise empty. Furthermore, the database connection is configured in an `.env` file.
 
 1. Create an admin user
@@ -120,7 +125,7 @@ But, before we can register a new sensor we have to login as the admin user and 
 sh> curl --location http://127.0.0.1:8080/auth/login -X POST --header 'Content-Type: application/json' \
      --data '{ "email": "john@gmail.com", "password": "MySecret" }'
 
-{"eyJ0eXAiOi..."}
+{"jwt":"89ecbd44-9e45-4a96-bcb3-bf3515479bfe"}
 ```
 
 The result of this REST call contains the JWT token that we need for registering a sensor called `MySensor`. This sensor produces two values which we store in the columns `count` and `temperature`. Note that the token is passed to the server via the authorization header. Without the token the request will fail.
@@ -134,7 +139,7 @@ sh> curl --location http://127.0.0.1:8080/api/sensors/create -X POST
 The result of this request contains the sensor identifier:
 
 ```JSON
-"89ecbd44-9e45-4a96-bcb3-bf3515479bfe"
+"{"jwt":"89ecbd44-9e45-4a96-bcb3-bf3515479bfe"}"
 ```
 
 4. Upload sensor data
@@ -182,10 +187,10 @@ With the key, uploaded data can be retrieved based on different optional conditi
 
 ```JSON
 {
-  "from": "2024-12-07T12:00:00.000Z",
-  "to": null,
-  "limit": 10,
-  "ordering": "DESC"
+    "from": "2024-12-07T12:00:00.000Z",
+    "to": null,
+    "limit": 10,
+    "ordering": "DESC"
 }
 ```
 
@@ -207,7 +212,7 @@ First, we start the database itself.
 sh> docker compose --profile precompile up -d
 ```
 
-This should start all services that are required to run during the build step of `SensBee`. If you want to run local tests the database started in the
+This should start all services that are required to run during the build step of `SensBee`. If you want to run local tests the database started in the 
 previous step will be used as well by default. The compose file uses host networking which allows a seamless development experience.
 
 Using the following command starts our server.
@@ -217,7 +222,7 @@ sh> docker compose --profile runtime up -d
 ```
 
 The `SensBee` server can be accessed via its REST API or the command line interface.
-NOTE this two steps are only required for the first time you build the `SensBee` docker image. During development, you can simply use the runtime profile
+NOTE this two steps are only required for the first time you build the `SensBee` docker image. During development, you can simply use the runtime profile 
 to bring up all services at once as the compilation step only happens if the image is not present.
 If you want to force a rebuild of the `SensBee` image run this command.
 

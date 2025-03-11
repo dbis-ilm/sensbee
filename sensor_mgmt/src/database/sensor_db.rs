@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::{Map, Value};
 use sqlx::{query_builder::QueryBuilder, Execute, PgConnection, Postgres, Row, Transaction};
+use crate::handler::models::responses::GenericUuidResponse;
 use crate::{database::models::sensor_perm::SensorPermission, state::AppState};
 use crate::database::models::api_key::ApiKey;
 use crate::database::models::sensor::{ColumnType, FullSensorInfo, SensorColumn, ShortSensorInfo};
@@ -9,7 +10,7 @@ use crate::database::models::role::ROLE_SYSTEM_GUEST;
 use crate::database::models::user::UserInfo;
 use crate::features::cache;
 use crate::features::sensor_data_storage::{register_sensor_data_storage, unregister_sensor_data_storage};
-use crate::handler::models::requests::{CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest, SensorDataRequest, SensorPermissionRequest};
+use crate::handler::models::requests::{DataLoadRequestParams, CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest, SensorPermissionRequest};
 use crate::features::user_sens_perm::{UserSensorPerm, UserSensorPermissions};
 
 /// Return a list of all registered sensors.
@@ -171,8 +172,8 @@ pub async fn delete_sensor(sensor_id: uuid::Uuid, state: &AppState) -> Result<()
     // now, we can commit the transaction
     let _ = tx.commit().await;
 
-    cache::purge_sensor(sensor_id);
-    cache::purge_api_keys_for_sensor(sensor_id);
+    cache::purge_sensor(sensor_id, state);
+    cache::purge_api_keys_for_sensor(sensor_id, state);
 
     Ok(())
 }
@@ -242,7 +243,7 @@ pub async fn edit_sensor(sensor_id: uuid::Uuid, body: EditSensorRequest, state: 
 
     let _ = tx.commit().await;
 
-    cache::purge_sensor(sensor_id);
+    cache::purge_sensor(sensor_id, state);
 
     Ok(())
 }
@@ -250,7 +251,7 @@ pub async fn edit_sensor(sensor_id: uuid::Uuid, body: EditSensorRequest, state: 
 /// Register a new sensor by creating the schema information and creating the data table.
 /// All the required information are passed via a CreateSensorRequest object.
 /// If a user is given, it becomes the owner of the sensor.
-pub async fn create_sensor(body: CreateSensorRequest, user_id: Option<uuid::Uuid>, state: &AppState) -> Result<uuid::Uuid> {
+pub async fn create_sensor(body: CreateSensorRequest, user_id: Option<uuid::Uuid>, state: &AppState) -> Result<GenericUuidResponse> {
     // create a new UUID
     let sensor_id = uuid::Uuid::new_v4();
 
@@ -354,7 +355,7 @@ pub async fn create_sensor(body: CreateSensorRequest, user_id: Option<uuid::Uuid
 
     let _ = tx.commit().await;
 
-    Ok(sensor_id)
+    Ok(GenericUuidResponse{uuid: sensor_id.to_string()})
 }
 
 /* ------------------------------------------------ Data Management ------------------------------------------------------------ */
@@ -443,7 +444,7 @@ pub async fn add_sensor_data(sensor_id: uuid::Uuid, body: &Value, state: &AppSta
 }
 
 /// Fetches data specified by the given predicates in SensorDataRequest.
-pub async fn get_data(sensor_id: uuid::Uuid, request: SensorDataRequest, state: &AppState) -> Result<Value> {
+pub async fn get_data(sensor_id: uuid::Uuid, request: DataLoadRequestParams, state: &AppState) -> Result<Value> {
     let sensor = cache::request_sensor(sensor_id, &state).await;
 
     if sensor.is_none() {
@@ -469,11 +470,11 @@ pub async fn get_data(sensor_id: uuid::Uuid, request: SensorDataRequest, state: 
     let mut predicates: Vec<String> = Vec::new();
 
     if request.from.is_some() {
-        predicates.push(format!("created_at >= {}", request.from.unwrap().format("'%Y-%m-%d %H:%M:%S.%3f'")));
+        predicates.push(format!("created_at >= {}", request.from.unwrap().format(&format!("'{}'", crate::utils::TIMESTAMP_FORMAT).to_string())));
     }
 
     if request.to.is_some() {
-        predicates.push(format!("created_at <= {}", request.to.unwrap().format("'%Y-%m-%d %H:%M:%S.%3f'")));
+        predicates.push(format!("created_at <= {}", request.to.unwrap().format(&format!("'{}'", crate::utils::TIMESTAMP_FORMAT).to_string())));
     }
     
     if !predicates.is_empty() {
@@ -531,22 +532,40 @@ pub async fn get_data(sensor_id: uuid::Uuid, request: SensorDataRequest, state: 
         // Extracts values for each column, inserting None if columns contains NULL or value is not parsable
         
         for col in sensor.columns.as_slice() {
+            let colname = col.name.to_lowercase();
             match &col.val_type {
-                ColumnType::INT => {  
-                    let val: Option<i32> = row.try_get(col.name.as_str()).map_or(None, |v| v);
-                    map.insert(col.name.clone(), serde_json::json!(val));
+                ColumnType::INT => {
+                    match row.try_get::<Option<i32>, _>(colname.as_str()) {
+                        Ok(val) => {
+                            map.insert(colname.clone(), serde_json::json!(val));
+                        },
+                        Err(err) => {
+                            eprintln!("Error retrieving INT value for column '{}': {}", colname, err);
+                        }
+                    }
                 }
                 
                 ColumnType::FLOAT => {
-                    let val: Option<f64> = row.try_get(col.name.as_str()).map_or(None, |v| v);
-                    map.insert(col.name.clone(), serde_json::json!(val));
+                    match row.try_get::<Option<f64>, _>(colname.as_str()) {
+                        Ok(val) => {
+                            map.insert(colname.clone(), serde_json::json!(val));
+                        },
+                        Err(err) => {
+                            eprintln!("Error retrieving FLOAT value for column '{}': {}", colname, err);
+                        }
+                    }
                 }
                 
                 ColumnType::STRING => {
-                    let val: Option<String> = row.try_get(col.name.as_str()).map_or(None, |v| v);
-                    map.insert(col.name.clone(), serde_json::json!(val));
+                    match row.try_get::<Option<String>, _>(colname.as_str()) {
+                        Ok(val) => {
+                            map.insert(colname.clone(), serde_json::json!(val));
+                        },
+                        Err(err) => {
+                            eprintln!("Error retrieving STRING value for column '{}': {}", colname, err);
+                        }
+                    }
                 }
-                
                 _ => {}
             }
         }
@@ -596,7 +615,7 @@ pub async fn get_user_sensor_permissions_impl(user: Option<&UserInfo>, sensor: &
     };
 
     // Add guest role for both, provided and anonymous users
-    let guest_role = cache::request_role(ROLE_SYSTEM_GUEST.to_string(), &state).await.unwrap();
+    let guest_role = cache::request_role(ROLE_SYSTEM_GUEST, &state).await.unwrap();
     user_roles.push(guest_role.clone());
 
     for role in user_roles.iter() {
@@ -647,7 +666,7 @@ pub async fn update_sensor_access(sensor_id: uuid::Uuid, permissions: Vec<Sensor
     let mut perm_changed = false;
     
     for permission in permissions {
-        let role = cache::request_role(permission.role_name.clone(), &state).await.expect(&format!("Couldn't find role with name {}!", permission.role_name));
+        let role = cache::request_role(permission.role_id, &state).await.expect(&format!("Couldn't find role with name {}!", permission.role_id));
 
         let mut allow_info = false;
         let mut allow_read = false;
@@ -792,7 +811,7 @@ pub async fn create_api_key(sensor_id: uuid::Uuid, user_id: uuid::Uuid, request:
 }
 
 /// Deletes api keys by id.
-pub async fn delete_api_keys(keys: Vec<uuid::Uuid>, con: &mut PgConnection) -> Result<()> {
+pub async fn delete_api_keys(keys: Vec<uuid::Uuid>, con: &mut PgConnection, _state: &AppState) -> Result<()> {
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new("DELETE FROM api_keys WHERE id IN ( ");
     
     let mut separated = query_builder.separated(", ");
@@ -817,7 +836,7 @@ pub async fn delete_api_keys(keys: Vec<uuid::Uuid>, con: &mut PgConnection) -> R
     }
 
     for key in keys.iter() {
-        cache::purge_api_key(*key);
+        cache::purge_api_key(*key, _state);
     }
     
     Ok(())
@@ -886,7 +905,7 @@ pub async fn validate_api_keys(sensor: Option<FullSensorInfo>, user: Option<User
     // Remove invalidated keys (if any)
     
     if !keys_to_delete.is_empty() {
-        let res = delete_api_keys(keys_to_delete.clone(), &mut *ex).await;
+        let res = delete_api_keys(keys_to_delete.clone(), &mut *ex, state).await;
         
         if res.is_err() {
             println!("Couldn't delete API keys {:?}!", keys_to_delete);

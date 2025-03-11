@@ -14,6 +14,16 @@ pub struct SensorDetailResponse {
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
+pub struct GenericUuidResponse {
+    pub uuid: String, // NOTE This should always be a Uuid but that type cant be used for OpenAPI Doc generation
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct LoginResponse {
+    pub jwt: String,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub message: String,
@@ -21,7 +31,6 @@ pub struct HealthResponse {
 
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
-    pub status: String,
     pub message: String,
 }
 

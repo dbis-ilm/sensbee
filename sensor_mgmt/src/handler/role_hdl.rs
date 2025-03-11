@@ -4,6 +4,7 @@ use crate::database::role_db;
 use crate::authentication::jwt_auth;
 use crate::handler::{main_hdl, policy};
 use crate::state::AppState;
+use super::models::requests::CreateRoleRequest;
 
 #[utoipa::path(
     get,
@@ -11,7 +12,7 @@ use crate::state::AppState;
     tag = "Roles",
     responses(
         (status = 200, description = "Returns a list of existing roles in the system.", body = Vec<Role>),
-        (status = 401, description= "Returns an unauthorized error if no valid token was provided."),
+        (status = 401, description = "Returns an unauthorized error if no valid token was provided."),
     ),
     security(("JWT" = [])),
 )]
@@ -37,8 +38,7 @@ async fn list_roles_handler(state: web::Data<AppState>, jwt: jwt_auth::JwtMiddle
     post,
     path = "/api/roles/create",
     request_body(
-        content_type = "application/json",
-        content = String,
+        content = CreateRoleRequest,
         description = "Name of the role to be created.",
     ),
     tag = "Roles",
@@ -51,7 +51,7 @@ async fn list_roles_handler(state: web::Data<AppState>, jwt: jwt_auth::JwtMiddle
 )]
 
 #[post("/roles/create")]
-async fn create_role_handler(body: web::Json<String>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
+async fn create_role_handler(body: web::Json<CreateRoleRequest>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Only admins may create new roles
     
     let user_id = jwt.user_id;
@@ -62,19 +62,15 @@ async fn create_role_handler(body: web::Json<String>, state: web::Data<AppState>
         return admin_check.unwrap();
     }
 
-    let result = role_db::create_role(body.into_inner(), &state).await;
+    let result = role_db::create_role(body.name.clone(), &state).await;
 
     main_hdl::send_result(&result)
 }
 
 #[utoipa::path(
     delete,
-    path = "/api/roles/delete",
-    request_body(
-        content_type = "application/json",
-        content = String,
-        description = "Name of the role to be deleted.",
-    ),
+    path = "/api/roles/{id}/delete",
+    params( ("id" = String, Path, description = "The uuid of the role", example = json!(uuid::Uuid::new_v4().to_string()))),
     tag = "Roles",
     responses(
         (status = 200, description = "Returns ok on the successful deletion."),
@@ -84,8 +80,8 @@ async fn create_role_handler(body: web::Json<String>, state: web::Data<AppState>
     security(("JWT" = [])),
 )]
 
-#[delete("/roles/delete")]
-async fn delete_role_handler(body: web::Json<String>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
+#[delete("/roles/{id}/delete")]
+async fn delete_role_handler(params: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Only admins may delete existing roles
     
     let user_id = jwt.user_id;
@@ -95,10 +91,10 @@ async fn delete_role_handler(body: web::Json<String>, state: web::Data<AppState>
     if admin_check.is_some() {
         return admin_check.unwrap();
     }
-    
-    let role_name = body.into_inner();
 
-    let result = role_db::delete_role(role_name, false, &state).await;
+    let id = params.into_inner();
+
+    let result = role_db::delete_role(id, false, &state).await;
 
     main_hdl::send_result(&result)
 }
@@ -109,12 +105,13 @@ async fn delete_role_handler(body: web::Json<String>, state: web::Data<AppState>
 mod tests {
     use actix_http::{Method, StatusCode};
     use serde_json::{json, Value};
+    use uuid::Uuid;
     use super::*;
     use sqlx::PgPool;
     use crate::database::models::api_key::ApiKey;
     use crate::database::models::role::{ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_GUEST, ROLE_SYSTEM_USER};
     use crate::features::cache;
-    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, john, login, test_invalid_auth};
+    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, john, login, test_invalid_auth, TEST_ROLE, TEST_ROLE2, TEST_ROLE_THAT_NOT_EXISTS_BUT_IS_VALID, TEST_SYS_ROLE, TEST_SYS_ROLE2};
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles"))]
     async fn test_list_roles(pool: PgPool) {
@@ -126,23 +123,23 @@ mod tests {
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let body = execute_request("/api/roles/list", Method::GET,
+        let body = execute_request("/api/roles/list", Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // Check if all roles are present
 
-        let required_roles = vec!["system_test_role".to_string(), "test_role".to_string(),
-                                  "system_test_role2".to_string(), "test_role2".to_string(),
-                                  ROLE_SYSTEM_ADMIN.to_string(), ROLE_SYSTEM_USER.to_string(),
-                                  ROLE_SYSTEM_GUEST.to_string()];
+        let required_roles = vec![TEST_SYS_ROLE, TEST_ROLE,
+                                TEST_SYS_ROLE2, TEST_ROLE2,
+                                ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_USER,
+                                ROLE_SYSTEM_GUEST];
         
-        let present_role_names: Vec<String> = body.as_array()
+        let present_role_names: Vec<uuid::Uuid> = body.as_array()
             .unwrap_or(&vec![]).iter()
             .map(|entry| entry
-                .get("name")
-                .and_then(|name| name.as_str())
-                .map(|s| s.to_string())
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(|s| Uuid::parse_str(&s.to_string()).unwrap())
                 .unwrap_or_default())
             .collect();
 
@@ -156,30 +153,30 @@ mod tests {
     async fn test_create_role(pool: PgPool) {
         let (app, state) = create_test_app(pool).await;
 
-        test_invalid_auth("/api/roles/create", Method::POST, Some(json!("new_role")), &state, &app).await;
+        test_invalid_auth("/api/roles/create", Method::POST, Some(json!({"name":"new_role"})), &state, &app).await;
 
         // --- Create new role as normal user - Should fail ---
 
         let token = login(&john().email, &john().password, &app).await;
         
-        let _ = execute_request("/api/roles/create", Method::POST,
-                                Some(json!("new_role")), Some(token.clone()),
+        let _ = execute_request("/api/roles/create", Method::POST, None,
+                                Some(json!({"name":"new_role"})), Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Create new role as admin user - Should succeed ---
 
-        role_db::assign_role_by_name(anne().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make Anne admin!");
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
         let token = login(&anne().email, &anne().password, &app).await;
 
-        let _ = execute_request("/api/roles/create", Method::POST,
-                                Some(json!("new_role")), Some(token.clone()),
+        let _ = execute_request("/api/roles/create", Method::POST, None,
+                                Some(json!({"name":"new_role"})), Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Create duplicated role as admin user - Should fail ---
 
-        let _ = execute_request("/api/roles/create", Method::POST,
-                                Some(json!("new_role")), Some(token.clone()),
+        let _ = execute_request("/api/roles/create", Method::POST, None,
+                                Some(json!({"name":"new_role"})), Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
     }
 
@@ -191,47 +188,47 @@ mod tests {
         let test_keys = create_test_api_keys(&state).await;
         let target_sensor_allowed = test_sens.iter().find(|(name, _)| name == "MySensor2").unwrap();
 
-        test_invalid_auth("/api/roles/delete", Method::DELETE, Some(json!("test_role")), &state, &app).await;
+        test_invalid_auth(format!("/api/roles/{}/delete", TEST_ROLE).as_str(), Method::DELETE, None::<Value>, &state, &app).await;
 
         // --- Delete existing non-system role as normal user - Should fail ---
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let _ = execute_request("/api/roles/delete", Method::DELETE,
-                                Some(json!("test_role")), Some(token.clone()),
+        let _ = execute_request(format!("/api/roles/{}/delete", TEST_ROLE).as_str(), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Delete existing non-system role as admin user - Should succeed ---
 
-        role_db::assign_role_by_name(anne().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make Anne admin!");
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
         let token = login(&anne().email, &anne().password, &app).await;
 
-        let _ = execute_request("/api/roles/delete", Method::DELETE,
-                                Some(json!("test_role")), Some(token.clone()),
+        let _ = execute_request(format!("/api/roles/{}/delete", TEST_ROLE).as_str(), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
         
         // Check if john is no longer assigned to this role
         
         let john = cache::request_user(john().id, &state).await.unwrap();
         
-        assert!(john.roles.iter().find(|r| r.name.eq("test_role")).is_none());
+        assert!(john.roles.iter().find(|r| r.id.eq(&TEST_ROLE)).is_none());
 
         // --- Delete non-existing role as admin user - Should fail ---
 
-        let _ = execute_request("/api/roles/delete", Method::DELETE,
-                                Some(json!("test_role_non_exit")), Some(token.clone()),
+        let _ = execute_request(format!("/api/roles/{}/delete", TEST_ROLE_THAT_NOT_EXISTS_BUT_IS_VALID).as_str(), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
         
         // --- Delete existing system role as admin user - Should fail ---
 
-        let _ = execute_request("/api/roles/delete", Method::DELETE,
-                                   Some(json!("system_test_role")), Some(token.clone()),
-                                   StatusCode::INTERNAL_SERVER_ERROR, &app).await;
+        let _ = execute_request(format!("/api/roles/{}/delete", TEST_SYS_ROLE).as_str(), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::INTERNAL_SERVER_ERROR, &app).await;
 
         // --- Force delete system role and check if johns api keys were removed ---
         
-        role_db::delete_role("system_test_role".to_string(), true, &state).await.unwrap();
+        role_db::delete_role(TEST_SYS_ROLE, true, &state).await.unwrap();
 
         let john_keys: Vec<ApiKey> = test_keys.iter().filter(|k| k.user_id == tests::john().id && k.sensor_id == target_sensor_allowed.1).cloned().collect();
 

@@ -1,18 +1,16 @@
-use actix_web::{delete, get, post, web, HttpResponse, Responder};
-use chrono::Utc;
-use serde_json::{json, Value};
-use sqlx::postgres::any::AnyConnectionBackend;
+use actix_web::{delete, get, post, web, Responder};
+use serde_json::{json,Value};
 use crate::database::models::db_structs::DBOperation;
 use crate::database::models::sensor::ShortSensorInfo;
-use crate::database::sensor_db::{add_sensor_data, create_sensor, delete_sensor, edit_sensor, get_data, get_sensor_overview};
+use crate::database::sensor_db::{create_sensor, delete_sensor, edit_sensor, get_sensor_overview};
 use crate::handler::{main_hdl, policy};
 use crate::authentication::jwt_auth;
 use crate::database::models::api_key::ApiKey;
 use crate::database::sensor_db;
 use crate::features::cache;
 use crate::handler::policy::unauthorized;
-use crate::handler::models::requests::{ApiKeyQueryParam, CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest, SensorDataRequest};
-use crate::handler::models::responses::SensorDetailResponse;
+use crate::handler::models::requests::{CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest};
+use crate::handler::models::responses::{GenericUuidResponse, SensorDetailResponse};
 use crate::features::user_sens_perm::UserSensorPerm;
 use crate::state::AppState;
 
@@ -68,7 +66,7 @@ async fn list_sensors_handler(data: web::Data<AppState>, jwt: jwt_auth::JwtMiddl
 
 #[utoipa::path(
     get,
-    path = "/api/sensors/{id}",
+    path = "/api/sensors/{id}/info",
     tag = "Sensors",
     params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
     responses(
@@ -78,7 +76,7 @@ async fn list_sensors_handler(data: web::Data<AppState>, jwt: jwt_auth::JwtMiddl
     )
 )]
 
-#[get("/sensors/{id}")]
+#[get("/sensors/{id}/info")]
 async fn get_sensor_info_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
     let sensor_id = path.into_inner();
@@ -149,11 +147,11 @@ async fn get_sensor_info_handler(path: web::Path<uuid::Uuid>, data: web::Data<Ap
         content_type = "application/json",
         content = CreateSensorRequest,
         description = "Description of the sensor.",
-        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ","WRITE"]}],"columns":[{"name":"count","val_type":"INT","val_unit":"number"},{"name":"temperature","val_type":"FLOAT","val_unit":"celsius"}], "storage": {"variant": "Default", "params": {}}}),
+        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ","WRITE"]}],"columns":[{"name":"count","val_type":"INT","val_unit":"number"},{"name":"temperature","val_type":"FLOAT","val_unit":"celsius"}], "storage": {"variant": "DEFAULT", "params": {}}}),
     ),
     tag = "Sensors",
     responses(
-        (status = 200, description = "Sensor id (uuid) of the newly registered sensor.", body = String, example = json!(uuid::Uuid::new_v4().to_string())),
+        (status = 200, description = "Sensor id (uuid) of the newly registered sensor.", body = GenericUuidResponse),
         (status = 401, description= "Returns an unauthorized error if no valid token was provided."),
     ),
     security(("JWT" = [])),
@@ -181,7 +179,7 @@ async fn create_sensor_handler(body: web::Json<CreateSensorRequest>, data: web::
         content_type = "application/json",
         content = EditSensorRequest,
         description = "Description of the sensor.",
-        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ"]}], "storage": {"variant": "Default", "params": {}}}),
+        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ"]}], "storage": {"variant": "DEFAULT", "params": {}}}),
     ),
     params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
     tag = "Sensors",
@@ -242,7 +240,7 @@ async fn delete_sensor_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppS
 
 #[utoipa::path(
     post,
-    path = "/api/sensors/{id}/api_key",
+    path = "/api/sensors/{id}/api_key/create",
     params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
     request_body(
         content_type = "application/json",
@@ -259,7 +257,7 @@ async fn delete_sensor_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppS
     security(("JWT" = [])),
 )]
 
-#[post("/sensors/{id}/api_key")]
+#[post("/sensors/{id}/api_key/create")]
 async fn create_sensor_api_key_handler(path: web::Path<uuid::Uuid>, body: web::Json<CreateApiKeyRequest>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
     let sensor_id = path.into_inner();
@@ -281,9 +279,11 @@ async fn create_sensor_api_key_handler(path: web::Path<uuid::Uuid>, body: web::J
 
 #[utoipa::path(
     delete,
-    path = "/api/sensors/{id}/api_key/{key_id}",
-    params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string())),
-    ("key_id" = String, Path, description = "The uuid of the key", example = json!(uuid::Uuid::new_v4().to_string()))),
+    path = "/api/sensors/{id}/api_key/{key_id}/delete",
+    params( 
+        ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string())),
+        ("key_id" = String, Path, description = "The uuid of the key", example = json!(uuid::Uuid::new_v4().to_string()))
+    ),
     tag = "Sensors",
     responses(
         (status = 200, description = "Returns ok if the api key was deleted."),
@@ -293,7 +293,7 @@ async fn create_sensor_api_key_handler(path: web::Path<uuid::Uuid>, body: web::J
     security(("JWT" = [])),
 )]
 
-#[delete("/sensors/{id}/api_key/{key_id}")]
+#[delete("/sensors/{id}/api_key/{key_id}/delete")]
 async fn delete_sensor_api_key_handler(path: web::Path<(uuid::Uuid, uuid::Uuid)>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
     
@@ -320,119 +320,13 @@ async fn delete_sensor_api_key_handler(path: web::Path<(uuid::Uuid, uuid::Uuid)>
         return perm_check.unwrap();
     }
 
-    let mut con = state.get_db_connection().await.unwrap();
+    let mut con = state.db.begin().await.unwrap();
 
-    let res = sensor_db::delete_api_keys(vec![key.id], con.as_mut()).await;
+    let res = sensor_db::delete_api_keys(vec![key.id], con.as_mut(), &state).await;
 
-    let _ = con.commit();
+    let _ = con.commit().await;
 
     main_hdl::send_result(&res)
-}
-
-/* ------------------------------------------------Data Management ------------------------------------------------------------ */
-
-#[utoipa::path(
-    post,
-    path = "/api/sensors/{id}/data",
-    request_body(
-        content_type = "application/json",
-        description = "Key/Value object with column names and values to insert for the specified sensor.<br>\
-        If invalid data is provided for the columns, NULLs will be inserted.",
-        example = json!({"col1": 42, "col2": 51.234, "col3": "Hello"})
-    ),
-    params( 
-        ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string())),
-        ("key" = String, Query, description = "The provided API key for writing data.", example = json!(uuid::Uuid::new_v4().to_string()))
-    ),
-    tag = "Sensors",
-    responses(
-        (status = 200, description = "Returns ok if the insertion was successful."),
-        (status = 401, description= "Returns an unauthorized error if access is not permitted."),
-        (status = 500, description= "Returns an error if the sensor does not exist or data couldn't be inserted."),
-    ),
-)]
-
-#[post("/sensors/{id}/data")]
-async fn ingest_data_handler(sensor_id: web::Path<uuid::Uuid>, params: web::Query<ApiKeyQueryParam>, body: web::Bytes, state: web::Data<AppState>) -> impl Responder {
-    match serde_json::from_slice::<Value>(&body) {
-        Ok(v) => {
-            let sensor_id = sensor_id.into_inner();
-
-            // Retrieves the api key if it exists and is valid
-
-            let api_key = match params.key {
-                Some(key) => cache::request_api_key(key, &state).await,
-                None => None
-            };
-
-            // Verifies key or guest access
-
-            let has_access = match api_key {
-                Some(key) => key.sensor_id == sensor_id && key.operation == DBOperation::WRITE,
-                None => policy::require_sensor_permission(None, sensor_id, UserSensorPerm::Write, &state).await.is_none()
-            };
-
-            if !has_access {
-                return unauthorized("No permissions to write sensor data!".to_string()).unwrap();
-            }
-
-            let result = add_sensor_data(sensor_id, &v, &state).await;
-
-            main_hdl::send_result(&result)
-        }
-        
-        Err(e) => {
-            println!("{}", format!("{:?}", e));
-            HttpResponse::InternalServerError().json(json!({"status": "error", "message": format!("{:?}", e)}))
-        }
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/sensors/{id}/data",
-    request_body(
-        content_type = "application/json",
-        content = SensorDataRequest,
-        description = "The specification of the sensor data to be retrieved."
-    ),
-    params( 
-        ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string())),
-        ("key" = String, Query, description = "The provided API key for reading data.", example = json!(uuid::Uuid::new_v4().to_string()))
-    ),
-    tag = "Sensors",
-    responses(
-        (status = 200, description = "Returns the retrieved key/value data.", body=Vec<Value>, example=json!([{"created_at": Utc::now().naive_utc(), "col1": 42, "col2": 51.234, "col3": "Hello"}])),
-        (status = 401, description= "Returns an unauthorized error if access is not permitted."),
-        (status = 500, description= "Returns an error if the sensor does not exist or the data couldn't be retrieved."),
-    ),
-)]
-
-#[get("/sensors/{id}/data")]
-async fn get_data_handler(path: web::Path<uuid::Uuid>, params: web::Query<ApiKeyQueryParam>, body: web::Json<SensorDataRequest>, state: web::Data<AppState>) -> impl Responder {
-    let sensor_id = path.into_inner();
-
-    // Retrieves the api key if it exists and is valid
-
-    let api_key = match params.key {
-        Some(key) => cache::request_api_key(key, &state).await,
-        None => None
-    };
-
-    // Verifies key or guest access
-
-    let has_access = match api_key {
-        Some(key) => key.sensor_id == sensor_id && key.operation == DBOperation::READ,
-        None => policy::require_sensor_permission(None, sensor_id, UserSensorPerm::Read, &state).await.is_none()
-    };
-
-    if !has_access {
-        return policy::unauthorized("No permissions to read sensor data!".to_string()).unwrap();
-    }
-
-    let result = get_data(sensor_id, body.into_inner(), &state).await;
-
-    main_hdl::send_result(&result)
 }
 
 /* ------------------------------------------------ Tests ------------------------------------------------------------ */
@@ -441,19 +335,15 @@ async fn get_data_handler(path: web::Path<uuid::Uuid>, params: web::Query<ApiKey
 pub mod tests {
     use actix_http::Method;
     use actix_web::http::StatusCode;
-    use async_std::task;
-    use chrono::{NaiveDateTime, Utc};
-    use serde_json::Map;
     use super::*;
     use sqlx::PgPool;
     use uuid::Uuid;
     use crate::database::models::role::{ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_USER};
     use crate::database::models::sensor::{ColumnType, SensorColumn};
     use crate::database::role_db;
-    use crate::database::models::db_structs::DBOrdering;
     use crate::features::sensor_data_storage::{SensorDataStorageCfg, SensorDataStorageType};
     use crate::handler::models::requests::SensorPermissionRequest;
-    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, john, login, test_invalid_auth};
+    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, john, login, test_invalid_auth, TEST_SYS_ROLE};
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
     async fn test_list_sensors(pool: PgPool) {
@@ -463,7 +353,7 @@ pub mod tests {
 
         // --- List public sensors without login - should succeed ---
 
-        let body = execute_request("/api/sensors/list", Method::GET,
+        let body = execute_request("/api/sensors/list", Method::GET, None,
                                    None::<Value>, None,
                                    StatusCode::OK, &app).await;
 
@@ -482,7 +372,7 @@ pub mod tests {
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let body = execute_request("/api/sensors/list", Method::GET,
+        let body = execute_request("/api/sensors/list", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
                                    StatusCode::OK, &app).await;
 
@@ -502,11 +392,11 @@ pub mod tests {
 
         // --- List sensors of Anne (admin) with her login - should succeed ---
 
-        role_db::assign_role_by_name(anne().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make Anne admin!");
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
         let token = login(&anne().email, &anne().password, &app).await;
 
-        let body = execute_request("/api/sensors/list", Method::GET,
+        let body = execute_request("/api/sensors/list", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
                                    StatusCode::OK, &app).await;
 
@@ -538,13 +428,13 @@ pub mod tests {
         let target_sensor_not_allowed = test_sens.iter().find(|(name, _)| name == "MySensor4").unwrap();
         let public_sensor = test_sens.iter().find(|(name, _)| name == "MySensor5").unwrap();
 
-        test_invalid_auth(format!("/api/sensors/{}", &target_sensor_own.1).as_str(), Method::GET, None::<Value>, &state, &app).await;
+        test_invalid_auth(format!("/api/sensors/{}/info", &target_sensor_own.1).as_str(), Method::GET, None::<Value>, &state, &app).await;
 
         // --- Access own sensor as John - should succeed ---
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let body = execute_request(&format!("/api/sensors/{}", &target_sensor_own.1), Method::GET,
+        let body = execute_request(&format!("/api/sensors/{}/info", &target_sensor_own.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
@@ -567,7 +457,7 @@ pub mod tests {
 
         // --- Access allowed sensor as John - should succeed ---
 
-        let body = execute_request(&format!("/api/sensors/{}", &target_sensor_allowed.1), Method::GET,
+        let body = execute_request(&format!("/api/sensors/{}/info", &target_sensor_allowed.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
@@ -581,33 +471,33 @@ pub mod tests {
 
         // --- Access not-allowed sensor as John - should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}", &target_sensor_not_allowed.1), Method::GET,
+        let _ = execute_request(&format!("/api/sensors/{}/info", &target_sensor_not_allowed.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Access not-allowed sensor as John (admin) - should succeed ---
 
-        role_db::assign_role_by_name(john().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make John admin!");
+        role_db::assign_role(john().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make John admin!");
 
-        let _ = execute_request(&format!("/api/sensors/{}", &target_sensor_not_allowed.1), Method::GET,
+        let _ = execute_request(&format!("/api/sensors/{}/info", &target_sensor_not_allowed.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Access non-existing sensor as John (admin) - should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}", Uuid::new_v4()), Method::GET,
+        let _ = execute_request(&format!("/api/sensors/{}/info", Uuid::new_v4()), Method::GET, None,
                                    None::<Value>, Some(token.clone()),
                                    StatusCode::INTERNAL_SERVER_ERROR, &app).await;
 
         // --- Access public sensor as John (admin) - should succeed ---
 
-        let _ = execute_request(&format!("/api/sensors/{}", &public_sensor.1), Method::GET,
+        let _ = execute_request(&format!("/api/sensors/{}/info", &public_sensor.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Access public sensor without login - should succeed ---
 
-        let body = execute_request(&format!("/api/sensors/{}", &public_sensor.1), Method::GET,
+        let body = execute_request(&format!("/api/sensors/{}/info", &public_sensor.1), Method::GET, None,
                                 None::<Value>, None,
                                 StatusCode::OK, &app).await;
 
@@ -626,7 +516,7 @@ pub mod tests {
                 name: name,
                 description: Some("My new sensor!".to_string()),
                 position: Some((50.0, 10.0)),
-                permissions: vec![SensorPermissionRequest { role_name: ROLE_SYSTEM_USER.to_string(), operations: vec![DBOperation::INFO, DBOperation::READ] }],
+                permissions: vec![SensorPermissionRequest { role_id: ROLE_SYSTEM_USER, operations: vec![DBOperation::INFO, DBOperation::READ] }],
                 columns: vec![
                     SensorColumn {
                         name: "col1".to_string(), val_type: ColumnType::INT, val_unit: "unit_1".to_string(),
@@ -653,13 +543,14 @@ pub mod tests {
         let sensor_descr = sensor_info.description.clone();
         let sensor_pos = sensor_info.position.clone();
 
-        let body = execute_request("/api/sensors/create", Method::POST,
+        let body = execute_request("/api/sensors/create", Method::POST, None,
                                 Some(sensor_info), Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // Check if sensor data is correct
 
-        let sensor_id: Uuid = serde_json::from_value(body).unwrap();
+        let resp: GenericUuidResponse = serde_json::from_value(body).unwrap();
+        let sensor_id = uuid::Uuid::parse_str(&resp.uuid).unwrap();
 
         let sensor = cache::request_sensor(sensor_id, &state).await.unwrap();
 
@@ -673,7 +564,7 @@ pub mod tests {
 
         let sensor_info = create_request("NewSensorName".to_string());
 
-        let _ = execute_request("/api/sensors/create", Method::POST,
+        let _ = execute_request("/api/sensors/create", Method::POST, None,
                                 Some(sensor_info), Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
     }
@@ -695,8 +586,8 @@ pub mod tests {
                 name: name,
                 description: Some("My new sensor!".to_string()),
                 position: Some((50.0, 10.0)),
-                permissions: vec![SensorPermissionRequest { role_name: ROLE_SYSTEM_USER.to_string(), operations: vec![DBOperation::READ]},
-                    SensorPermissionRequest { role_name: "system_test_role".to_string(), operations: vec![]}],
+                permissions: vec![SensorPermissionRequest { role_id: ROLE_SYSTEM_USER, operations: vec![DBOperation::READ]},
+                    SensorPermissionRequest { role_id: TEST_SYS_ROLE, operations: vec![]}],
                 storage: SensorDataStorageCfg { variant: SensorDataStorageType::RingBufferCount, params: json!({"count": 10}).as_object().cloned() }
             }
         }
@@ -713,7 +604,7 @@ pub mod tests {
         let sensor_descr = sensor_info.description.clone();
         let sensor_pos = sensor_info.position.clone();
         
-        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_allowed.1), Method::POST, None,
                                 Some(sensor_info), Some(anne_token.clone()),
                                 StatusCode::OK, &app).await;
 
@@ -728,7 +619,7 @@ pub mod tests {
 
         let token = login(&john().email, &john().password, &app).await;
         
-        let _ = execute_request(&format!("/api/sensors/{}", &target_sensor_allowed.1), Method::GET,
+        let _ = execute_request(&format!("/api/sensors/{}/info", &target_sensor_allowed.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
         
@@ -743,21 +634,21 @@ pub mod tests {
 
         // --- Edit not-allowed sensor as john - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_not_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_not_allowed.1), Method::POST, None,
                                 Some(edit_request("MyNewName".to_string())), Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Edit not-allowed sensor as john (admin) - Should succeed ---
 
-        role_db::assign_role_by_name(john().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make John admin!");
+        role_db::assign_role(john().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make John admin!");
 
-        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_not_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/edit", target_sensor_not_allowed.1), Method::POST, None,
                                 Some(edit_request("MyNewName2".to_string())), Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Edit non-existing sensor as john (admin) - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/edit", Uuid::new_v4()), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/edit", Uuid::new_v4()), Method::POST, None,
                                 Some(edit_request("MyNewName2".to_string())), Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
     }
@@ -777,33 +668,33 @@ pub mod tests {
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_allowed.1), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_allowed.1), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Delete allowed (his own) sensor as john again - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_allowed.1), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_allowed.1), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
         
         // --- Delete un-allowed sensor as john - Should fail ---
         
-        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_not_allowed.1), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_not_allowed.1), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Delete un-allowed sensor as john (as admin) - Should succeed ---
 
-        role_db::assign_role_by_name(john().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make John admin!");
+        role_db::assign_role(john().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make John admin!");
 
-        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_not_allowed.1), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_not_allowed.1), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Delete non-existing sensor as john (as admin) - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/delete", Uuid::new_v4()), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/delete", Uuid::new_v4()), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
     }
@@ -819,13 +710,13 @@ pub mod tests {
         
         let payload = CreateApiKeyRequest { name: "MyTestKey".to_string(), operation: DBOperation::READ };
 
-        test_invalid_auth(format!("/api/sensors/{}/api_key", target_sensor_allowed.1).as_str(), Method::POST, Some(payload.clone()), &state, &app).await;
+        test_invalid_auth(format!("/api/sensors/{}/api_key/create", target_sensor_allowed.1).as_str(), Method::POST, Some(payload.clone()), &state, &app).await;
 
         // --- Create allowed sensor key as john - Should succeed ---
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let body = execute_request(&format!("/api/sensors/{}/api_key", target_sensor_allowed.1), Method::POST,
+        let body = execute_request(&format!("/api/sensors/{}/api_key/create", target_sensor_allowed.1), Method::POST, None,
                                 Some(payload.clone()), Some(token.clone()),
                                 StatusCode::OK, &app).await;
         
@@ -836,7 +727,7 @@ pub mod tests {
 
         // --- Create not allowed sensor key as john - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key", target_sensor_not_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/create", target_sensor_not_allowed.1), Method::POST, None,
                                 Some(payload.clone()), Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -844,21 +735,21 @@ pub mod tests {
 
         let payload_inv = CreateApiKeyRequest { name: "MyTestKey2".to_string(), operation: DBOperation::INFO };
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key", target_sensor_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/create", target_sensor_allowed.1), Method::POST, None,
                                 Some(payload_inv.clone()), Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Create un-allowed sensor as john (as admin) - Should succeed ---
 
-        role_db::assign_role_by_name(john().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make John admin!");
+        role_db::assign_role(john().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make John admin!");
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key", target_sensor_not_allowed.1), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/create", target_sensor_not_allowed.1), Method::POST, None,
                                 Some(payload.clone()), Some(token.clone()),
                                 StatusCode::OK, &app).await;
 
         // --- Create key for non-existent sensor - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key", Uuid::new_v4()), Method::POST,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/create", Uuid::new_v4()), Method::POST, None,
                                 Some(payload.clone()), Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
     }
@@ -875,13 +766,13 @@ pub mod tests {
         let john_key_read_allowed = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::READ).unwrap().id;
         let john_key_write_allowed = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::WRITE).unwrap().id;
         
-        test_invalid_auth(format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, john_key_read_allowed).as_str(), Method::DELETE, None::<Value>, &state, &app).await;
+        test_invalid_auth(format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_read_allowed).as_str(), Method::DELETE, None::<Value>, &state, &app).await;
 
         // --- Delete allowed sensor key as john - Should succeed ---
 
         let token = login(&john().email, &john().password, &app).await;
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, john_key_read_allowed), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_read_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
         
@@ -890,13 +781,13 @@ pub mod tests {
 
         // --- Delete allowed sensor key as john again - Should fail ---
         
-        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, john_key_read_allowed), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_read_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
         
         // --- Delete not existing key as john - Should fail ---
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, Uuid::new_v4()), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, Uuid::new_v4()), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -904,463 +795,16 @@ pub mod tests {
 
         let token = login(&anne().email, &anne().password, &app).await;
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, john_key_write_allowed), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_write_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Delete not allowed key as anne (admin) - Should succeed ----
 
-        role_db::assign_role_by_name(anne().id, ROLE_SYSTEM_ADMIN.to_string(), true, &state).await.expect("Failed to make Anne admin!");
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
-        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}", target_sensor_allowed.1, john_key_write_allowed), Method::DELETE,
+        let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_write_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
-                                StatusCode::OK, &app).await;
-    }
-
-    #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
-    async fn test_ingest_sensor(pool: PgPool) {
-        let (app, state) = create_test_app(pool).await;
-
-        let test_sens = create_test_sensors(&state).await;
-        let test_keys = create_test_api_keys(&state).await;
-
-        let target_sensor_own = test_sens.iter().find(|(name, _)| name == "MySensor").unwrap();
-        let target_sensor_allowed = test_sens.iter().find(|(name, _)| name == "MySensor2").unwrap();
-        let target_sensor_not_allowed = test_sens.iter().find(|(name, _)| name == "MySensor4").unwrap();
-        let public_sensor = test_sens.iter().find(|(name, _)| name == "MySensor5").unwrap();
-
-        let payload = {
-            json!({
-                "col1": 42,
-                "col2": 56.789,
-                "col3": "Hello",
-            })
-        };
-
-        // --- Ingest allowed (his own) sensor data as john with key - Should succeed ---
-
-        let api_key_write = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_own.1 && k.operation == DBOperation::WRITE).unwrap().id;
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_write), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Ingest allowed sensor data as john with key - Should succeed ---
-
-        let api_key_write = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::WRITE).unwrap().id;
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_allowed.1, api_key_write), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Ingest allowed sensor as john with valid key but wrong op (READ) - Should fail ---
-
-        let api_key_read = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::READ).unwrap().id;
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_allowed.1, api_key_read), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-        
-        // --- Ingest un-allowed sensor with valid key (john) of wrong sensor - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_not_allowed.1, api_key_write), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Ingest sensor with invalid key - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_not_allowed.1, Uuid::new_v4()), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Ingest non-existing sensor without key - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", Uuid::new_v4()), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::INTERNAL_SERVER_ERROR, &app).await;
-
-        // --- Ingest public sensor without key - Should succeed ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Ingest public sensor with valid key of wrong sensor - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", public_sensor.1, api_key_write), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Ingest public sensor with invalid key - Should succeed ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", public_sensor.1, Uuid::new_v4()), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Ingest various invalid data to public sensor - Should succeed ---
-
-        fn compare_payload(payload: &Value, entry: &Map<String, Value>) -> bool {
-            match (payload, entry) {
-                (Value::Object(sub_map), super_map) => {
-                    sub_map.iter().all(|(k, v)| super_map.get(k) == Some(v))
-                }
-                _ => false,
-            }
-        }
-
-        let req_payload = SensorDataRequest {
-            limit: Some(1),
-            ordering: Some(DBOrdering::DESC),
-            from: None,
-            to: None,
-        };
-
-        // --- Some columns invalid - should be inserted as NULLs
-
-        let payload = {
-            json!({
-                "col1": "42",
-                "col2": "56.789",
-                "col3": "42",
-            })
-        };
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // Check result
-
-        let body = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let expected_result = {
-            json!({
-                "col1": null,
-                "col2": null,
-                "col3": "42",
-            })
-        };
-
-        let elm = body.as_array().unwrap().first().unwrap();
-        assert!(compare_payload(&expected_result, elm.as_object().unwrap()));
-
-        // --- All columns invalid - should be inserted as NULLs
-
-        let payload = {
-            json!({
-                "col1": "42",
-                "col2": "56.789",
-                "col3": 42,
-            })
-        };
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // Check result
-
-        let body = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let expected_result = {
-            json!({
-                "col1": null,
-                "col2": null,
-                "col3": null,
-            })
-        };
-
-        let elm = body.as_array().unwrap().first().unwrap();
-        assert!(compare_payload(&expected_result, elm.as_object().unwrap()));
-
-        // --- Some invalid col names - Only col2 should be inserted correctly, rest NULL
-
-        let payload = {
-            json!({
-                "xz": 42,
-                "col2": 56.789,
-                "bv": 42,
-            })
-        };
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // Check result
-
-        let body = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let expected_result = {
-            json!({
-                "col1": null,
-                "col2": 56.789,
-                "col3": null,
-            })
-        };
-
-        let elm = body.as_array().unwrap().first().unwrap();
-        assert!(compare_payload(&expected_result, elm.as_object().unwrap()));
-
-        // --- All invalid col names - Insertion should fail
-
-        let payload = {
-            json!({
-                "xz": 42,
-                "gg": 56.789,
-                "bv": 42,
-            })
-        };
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::POST,
-                                Some(payload.clone()), None,
-                                StatusCode::INTERNAL_SERVER_ERROR, &app).await;
-    }
-
-    #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
-    async fn test_get_data_sensor(pool: PgPool) {
-        let (app, state) = create_test_app(pool).await;
-
-        let test_sens = create_test_sensors(&state).await;
-        let test_keys = create_test_api_keys(&state).await;
-
-        let target_sensor_own = test_sens.iter().find(|(name, _)| name == "MySensor").unwrap();
-        let target_sensor_allowed = test_sens.iter().find(|(name, _)| name == "MySensor2").unwrap();
-        let target_sensor_not_allowed = test_sens.iter().find(|(name, _)| name == "MySensor4").unwrap();
-        let public_sensor = test_sens.iter().find(|(name, _)| name == "MySensor5").unwrap();
-
-        let req_payload = SensorDataRequest {
-            limit: None,
-            ordering: None,
-            from: None,
-            to: None,
-        };
-
-        fn compare_payload(payload: &Value, entry: &Map<String, Value>) -> bool {
-            match (payload, entry) {
-                (Value::Object(sub_map), super_map) => {
-                    sub_map.iter().all(|(k, v)| super_map.get(k) == Some(v))
-                }
-                _ => false,
-            }
-        }
-
-        // --- Ingest allowed (his own) sensor dummy data as john - Should succeed ---
-
-        // Ingest 10 dummy data entries
-
-        let mut payloads: Vec<Value> = Vec::new();
-
-        for i in 0..10 {
-            let payload = {
-                json!({
-                "col1": i,
-                "col2": 56.789,
-                "col3": "Hallo",
-            })};
-
-            payloads.push(payload);
-        }
-
-        let time_start: NaiveDateTime = Utc::now().naive_utc();
-        let mut time_between: NaiveDateTime = Default::default();
-        
-        let api_key_write = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_own.1 && k.operation == DBOperation::WRITE).unwrap().id;
-
-        for (index, payload) in payloads.iter().enumerate() {
-            execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_write), Method::POST,
-                            Some(payload.clone()), None,
-                            StatusCode::OK, &app).await;
-
-            task::sleep(core::time::Duration::from_millis(25)).await; // A little bit of time for time tracking
-            
-            if index == 4 {
-                time_between = Utc::now().naive_utc();
-            }
-        }
-
-        let time_end: NaiveDateTime = Utc::now().naive_utc();
-
-        // --- Get own sensor data with valid key (john) - Should succeed ---
-
-        let api_key_read = test_keys.iter().find(|key| key.sensor_id == target_sensor_own.1 && key.user_id == john().id && key.operation == DBOperation::READ).unwrap().id;
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elms = body.as_array().unwrap();
-
-        assert_eq!(elms.len(), payloads.len()); // We retrieved all data
-
-        // Check if data is correct
-
-        for (index, elm) in elms.iter().enumerate() {
-            assert!(compare_payload(payloads.get(index).unwrap(), elm.as_object().unwrap()));
-        }
-
-        // --- Perform various allowed data retrievals to check correctness of data ---
-
-        // Get only 5 elements
-        let req_payload = SensorDataRequest {
-            limit: Some(5),
-            ordering: None,
-            from: None,
-            to: None,
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        assert_eq!(body.as_array().unwrap().len(), 5);
-
-        // Get the first (oldest) element
-        let req_payload = SensorDataRequest {
-            limit: Some(1),
-            ordering: Some(DBOrdering::ASC),
-            from: None,
-            to: None,
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elm = body.as_array().unwrap().first().unwrap();
-        assert!(compare_payload(payloads.first().unwrap(), elm.as_object().unwrap()));
-
-        // Get the last (newest) element
-        let req_payload = SensorDataRequest {
-            limit: Some(1),
-            ordering: Some(DBOrdering::DESC),
-            from: None,
-            to: None,
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elm = body.as_array().unwrap().first().unwrap();
-        assert!(compare_payload(payloads.last().unwrap(), elm.as_object().unwrap()));
-
-        // Get the first 5 elements based on time
-        let req_payload = SensorDataRequest {
-            limit: None,
-            ordering: None,
-            from: Some(time_start),
-            to: Some(time_between),
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elms = body.as_array().unwrap();
-
-        assert_eq!(elms.len(), 5);
-
-        for (index, elm) in elms.iter().enumerate() {
-            assert!(compare_payload(payloads.get(index).unwrap(), elm.as_object().unwrap()));
-        }
-
-        // Get the last 5 elements based on time
-        let req_payload = SensorDataRequest {
-            limit: None,
-            ordering: None,
-            from: Some(time_between),
-            to: Some(time_end),
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elms = body.as_array().unwrap();
-
-        assert_eq!(elms.len(), 5);
-        
-        for (index, elm) in elms.iter().enumerate() { // 5 last elements are ASC sorted
-            assert!(compare_payload(payloads.get(5 + index).unwrap(), elm.as_object().unwrap()));
-        }
-
-        // All together, last 3 elements (of 5) desc
-        let req_payload = SensorDataRequest {
-            limit: Some(3),
-            ordering: Some(DBOrdering::DESC),
-            from: Some(time_between),
-            to: Some(time_end),
-        };
-
-        let body = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_own.1, api_key_read), Method::GET,
-                                   Some(req_payload.clone()), None,
-                                   StatusCode::OK, &app).await;
-
-        let elms = body.as_array().unwrap();
-
-        assert_eq!(elms.len(), 3);
-
-        for (index, elm) in elms.iter().enumerate() {
-            assert!(compare_payload(payloads.get(9 - index).unwrap(), elm.as_object().unwrap()));
-        }
-
-        // --- Get allowed sensor data with valid key (john) - Should succeed ---
-
-        let api_key_read = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::READ).unwrap().id;
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_allowed.1, api_key_read), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Get not allowed sensor data with valid key (john) of wrong sensor - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_not_allowed.1, api_key_read), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Get allowed sensor data with valid key (john) but wrong op (write) - Should fail ---
-
-        let api_key_write = test_keys.iter().find(|k| k.user_id == john().id && k.sensor_id == target_sensor_allowed.1 && k.operation == DBOperation::WRITE).unwrap().id;
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", target_sensor_allowed.1, api_key_write), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Get non-existing sensor data without key - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", Uuid::new_v4()), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::INTERNAL_SERVER_ERROR, &app).await;
-
-        // --- Get non-public sensor data without key - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", target_sensor_not_allowed.1), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Get public sensor data without key - Should succeed ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data", public_sensor.1), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::OK, &app).await;
-
-        // --- Get public sensor data with valid key of wrong sensor - Should fail ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", public_sensor.1, api_key_write), Method::GET,
-                                Some(req_payload.clone()), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Get public sensor data with invalid key - Should succeed ---
-
-        let _ = execute_request(&format!("/api/sensors/{}/data?key={}", public_sensor.1, Uuid::new_v4()), Method::GET,
-                                Some(req_payload.clone()), None,
                                 StatusCode::OK, &app).await;
     }
 }

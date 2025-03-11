@@ -1,10 +1,10 @@
 use crate::authentication::{jwt_auth, token, token_cache};
+use crate::handler::models::responses::LoginResponse;
 use actix_web::{get, post, web, HttpResponse, Responder};
 use actix_web::cookie::Cookie;
 use actix_web::cookie::time::Duration as ActixWebDuration;
 use serde_json::json;
 use crate::database::user_db::check_user_login;
-use crate::handler::policy::unauthorized;
 use crate::handler::models::requests::LoginUserRequest;
 use crate::state::AppState;
 
@@ -18,7 +18,7 @@ use crate::state::AppState;
     ),
     tag = "Authentication",
     responses(
-        (status = 200, description= "Returns the authentication token.", body = String),
+        (status = 200, description= "Returns the authentication token.", body = LoginResponse),
         (status = 401, description= "Returns an unauthorized error if the credentials were invalid."),
     )
 )]
@@ -28,13 +28,13 @@ async fn login_user_handler(body: web::Json<LoginUserRequest>, data: web::Data<A
     let result = check_user_login(body.into_inner(), &data).await;
     
     if let Err(_) = result {
-        return HttpResponse::Unauthorized().json(json!({"status": "fail", "message": "Invalid email or password"}));
+        return HttpResponse::Unauthorized().json(json!({"error": "Invalid email or password"}));
     }
     
     let user = result.unwrap();
     
     if !user.verified {
-        return unauthorized("User has not been verified yet!".to_string()).unwrap();
+        return HttpResponse::Unauthorized().json(json!({"error": "User has not been verified yet"}));
     }
 
     let access_token_details = match token::generate_jwt_token(
@@ -44,7 +44,7 @@ async fn login_user_handler(body: web::Json<LoginUserRequest>, data: web::Data<A
     ) {
         Ok(token_details) => token_details,
         Err(e) => {
-            return HttpResponse::BadGateway().json(json!({"status": "fail", "message": format_args!("{}", e)}));
+            return HttpResponse::BadGateway().json(json!({"error": format_args!("{}", e)}));
         }
     };
     
@@ -60,7 +60,7 @@ async fn login_user_handler(body: web::Json<LoginUserRequest>, data: web::Data<A
 
     HttpResponse::Ok()
         .cookie(cookie)
-        .json(json!(token))
+        .json(json!({"jwt": token}))
 }
 
 #[utoipa::path(
@@ -86,7 +86,7 @@ async fn logout_user_handler(jwt: jwt_auth::JwtMiddleware) -> impl Responder {
 
     HttpResponse::Ok()
         .cookie(cookie)
-        .json(json!({"status": "success"}))
+        .json("{}")
 }
 
 /* ------------------------------------------------ Tests ------------------------------------------------------------ */
@@ -111,7 +111,7 @@ mod tests {
             "password": "1234",
         });
 
-        let _ = execute_request("/auth/login", Method::POST,
+        let _ = execute_request("/auth/login", Method::POST, None,
                                 Some(payload), None,
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -122,7 +122,7 @@ mod tests {
             "password": "1234",
         });
 
-        let _ = execute_request("/auth/login", Method::POST,
+        let _ = execute_request("/auth/login", Method::POST, None,
                                 Some(payload), None,
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -133,7 +133,7 @@ mod tests {
             "password": jane().password,
         });
 
-        let _ = execute_request("/auth/login", Method::POST,
+        let _ = execute_request("/auth/login", Method::POST, None,
                                    Some(payload), None,
                                    StatusCode::UNAUTHORIZED, &app).await;
 
@@ -151,7 +151,7 @@ mod tests {
         let token = login(&john().email, &john().password, &app).await;
         let token_details = token_cache::get_token_by_string(token.to_owned()).unwrap();
 
-        let _ = execute_request("/auth/logout", Method::GET,
+        let _ = execute_request("/auth/logout", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
                                    StatusCode::OK, &app).await;
         
@@ -161,13 +161,13 @@ mod tests {
 
         // Logout again, should fail since token is invalidated --- Should fail
 
-        let _ = execute_request("/auth/logout", Method::GET,
+        let _ = execute_request("/auth/logout", Method::GET, None,
                                 None::<Value>, Some(token),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
         // Logout again without token --- Should succeed
 
-        let _ = execute_request("/auth/logout", Method::GET,
+        let _ = execute_request("/auth/logout", Method::GET, None,
                                 None::<Value>, None,
                                 StatusCode::OK, &app).await;
     }

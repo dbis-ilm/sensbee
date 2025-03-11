@@ -1,12 +1,11 @@
 use std::future::{ready, Ready};
-
-use actix_web::error::ErrorUnauthorized;
 use actix_web::{dev::Payload, Error as ActixWebError};
 use actix_web::{http, web, FromRequest, HttpMessage, HttpRequest};
 use crate::authentication::token::verify_jwt_token;
 use crate::authentication::token_cache;
-use crate::handler::models::responses::ErrorResponse;
 use crate::state::AppState;
+use crate::utils;
+
 
 pub struct JwtMiddleware {
     pub user_id: Option<uuid::Uuid>,
@@ -44,13 +43,9 @@ impl FromRequest for JwtMiddleware {
             &token.unwrap(),
         ) {
             Ok(token_details) => token_details,
-            Err(e) => {
-                let json_error = ErrorResponse {
-                    status: "Invalid token!".to_string(),
-                    message: format!("{:?}", e),
-                };
-
-                return ready(Err(ErrorUnauthorized(json_error)));
+            Err(_) => {
+                // TODO print e to internal error log?
+                return ready(Err(utils::SBError::Unauthorized.into()));
             }
         };
 
@@ -61,10 +56,7 @@ impl FromRequest for JwtMiddleware {
         let (valid, user_id) = token_cache::has_token(token_id.to_owned());
 
         if !valid {
-            return ready(Err(ErrorUnauthorized(ErrorResponse {
-                status: "Invalid token".to_string(),
-                message: "Token has expired!".to_string(),
-            })));
+            return ready(Err(utils::SBError::Unauthorized.into()));
         }
 
         // At this point we do not validate the user (if he still exists), this is done in handlers

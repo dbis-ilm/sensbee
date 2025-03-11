@@ -6,7 +6,12 @@ use crate::database::{sensor_db, user_db};
 use crate::state::AppState;
 
 pub async fn create_role(role_name: String, state: &AppState) -> Result<Role> {
-    let new_role = sqlx::query_as!(Role, "INSERT INTO roles(name, system) VALUES($1, false) RETURNING *", role_name.to_string())
+
+    // create a new UUID
+    let role_id = uuid::Uuid::new_v4();
+
+    // NOTE system roles should only be created using the cli tool. The tool talks directly to the DB. 
+    let new_role = sqlx::query_as!(Role, "INSERT INTO roles(id, name) VALUES($1, $2) RETURNING *", role_id, role_name.to_string())
         .fetch_one(&state.db)
         .await;
 
@@ -19,12 +24,12 @@ pub async fn create_role(role_name: String, state: &AppState) -> Result<Role> {
     }
 }
 
-pub async fn delete_role(role_name: String, allow_system_delete: bool, state: &AppState) -> Result<()> {
+pub async fn delete_role(role_id: uuid::Uuid, allow_system_delete: bool, state: &AppState) -> Result<()> {
     // Fetch role and verify that it can be removed
-    let role = cache::request_role(role_name.clone(), &state).await;
+    let role = cache::request_role(role_id, &state).await;
 
     if role.is_none() {
-        anyhow::bail!("Role with name {} not found!", role_name);
+        anyhow::bail!("Role with name {} not found!", role_id);
     }
 
     let role = role.unwrap();
@@ -102,33 +107,32 @@ pub async fn delete_role(role_name: String, allow_system_delete: bool, state: &A
     }
 
     let _ = tx.commit().await;
-
-    for u in affected_users {
-        cache::purge_user(u);
-    }
     
-    cache::purge_role(role.name);
+    for u in affected_users {
+        cache::purge_user(u, state);
+    }   
+    cache::purge_role(role.id, &state);
 
     Ok(())
 }
 
 /// Gets the role entry based on its name from the db.
-pub async fn get_role_by_name(name: String, state: &AppState) -> Result<Role> {
-    let role = sqlx::query_as!(Role, "SELECT * FROM roles WHERE name=$1", name)
+pub async fn get_role(id: uuid::Uuid, state: &AppState) -> Result<Role> {
+    let role = sqlx::query_as!(Role, "SELECT * FROM roles WHERE id = $1", id)
         .fetch_one(&state.db)
         .await;
 
     match role {
         Ok(role) => Ok(role),
         Err(err) => {
-            println!("Role with name {} not found!", name);
+            println!("Role with name {} not found!", id);
             anyhow::bail!(err)
         }
     }
 }
 
 /// Assigns a role to a user by the name of the role. This fetches the respective role entry from db first.
-pub async fn assign_role_by_name(user_id: uuid::Uuid, role_name: String, allow_system: bool, state: &AppState) -> Result<()> {
+pub async fn assign_role(user_id: uuid::Uuid, role_id: uuid::Uuid, allow_system: bool, state: &AppState) -> Result<()> {
     let user = cache::request_user(user_id, state).await;
 
     if user.is_none() {
@@ -136,22 +140,22 @@ pub async fn assign_role_by_name(user_id: uuid::Uuid, role_name: String, allow_s
     }
     
     // Request the role from DB by its name
-    let role = cache::request_role(role_name.clone(), &state).await;
+    let role = cache::request_role(role_id, &state).await;
 
     if role.is_none() {
-        anyhow::bail!("Couldn't find role with name {}!", role_name);
+        anyhow::bail!("Couldn't find role with name {}!", role_id);
     }
 
     let role = role.unwrap();
 
     if role.system && !allow_system {
-        anyhow::bail!("System role {} can't be assigned to user {}!", role_name, user_id);
+        anyhow::bail!("System role {} can't be assigned to user {}!", role_id, user_id);
     }
 
-    let res = assign_role_by_id(user_id, role.id, &state.db).await;
+    let res = assign_role_by_id(user_id, role.id, &state.db, state).await;
 
     if let Err(err) = res {
-        println!("Couldn't assign role {} to user {}!", role_name, user_id);
+        println!("Couldn't assign role {} to user {}!", role_id, user_id);
         anyhow::bail!(err)
     }
 
@@ -160,7 +164,7 @@ pub async fn assign_role_by_name(user_id: uuid::Uuid, role_name: String, allow_s
 
 /// Assigns a role by its id to a user, can be used during a transaction by passing the transaction obj.
 /// This also allows to assign system roles, e.g. when users are created.
-pub async fn assign_role_by_id(user_id: uuid::Uuid, role_id: i32, executor: impl PgExecutor<'_>) -> Result<()> {
+pub async fn assign_role_by_id(user_id: uuid::Uuid, role_id: uuid::Uuid, executor: impl PgExecutor<'_>, _state: &AppState) -> Result<()> {
     let query_res = sqlx::query("INSERT INTO user_roles(user_id, role_id) VALUES($1, $2)")
         .bind(user_id)
         .bind(role_id)
@@ -173,29 +177,29 @@ pub async fn assign_role_by_id(user_id: uuid::Uuid, role_id: i32, executor: impl
         anyhow::bail!(err)
     }
 
-    cache::purge_user(user_id);
+    cache::purge_user(user_id, _state);
     
     Ok(())
 }
 
 /// Revokes a role by its name from a user. System roles can not be removed manually from users!
-pub async fn revoke_role(user_id: uuid::Uuid, role_name: String, allow_system: bool, state: &AppState) -> Result<()> {
+pub async fn revoke_role(user_id: uuid::Uuid, role_id: uuid::Uuid, allow_system: bool, state: &AppState) -> Result<()> {
     let user = cache::request_user(user_id, state).await;
 
     if user.is_none() {
         anyhow::bail!("Couldn't find user with id {}!", user_id);
     }
     
-    let role = cache::request_role(role_name.clone(), &state).await;
+    let role = cache::request_role(role_id, &state).await;
     
     if role.is_none() {
-        anyhow::bail!("Couldn't find role with name {}!", role_name);
+        anyhow::bail!("Couldn't find role with name {}!", role_id);
     }
     
     let role = role.unwrap();
     
     if role.system && !allow_system {
-        anyhow::bail!("System role {} can't be revoked from user {}!", role_name, user_id);
+        anyhow::bail!("System role {} can't be revoked from user {}!", role_id, user_id);
     }
 
     let mut tx = state.db.begin().await?;
@@ -235,7 +239,7 @@ pub async fn revoke_role(user_id: uuid::Uuid, role_name: String, allow_system: b
 
     let _ = tx.commit().await;
 
-    cache::purge_user(user_id);
+    cache::purge_user(user_id, state);
 
     Ok(())
 }

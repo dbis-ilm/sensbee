@@ -1,5 +1,8 @@
-use sqlx::{Error, Postgres};
-use sqlx::pool::PoolConnection;
+use std::sync::Arc;
+use crate::features::cache;
+use crate::features::cache::CachedData;
+#[cfg(feature = "cache_sync")]
+use crate::features::cache_sync::CacheSyncData;
 
 #[derive(Debug, Clone)]
 pub struct JWTConfig {
@@ -26,14 +29,28 @@ impl JWTConfig {
 /// Safe to clone since PgPool only clones the reference to the underlying db pool.
 #[derive(Clone)]
 pub struct AppState {
+
     pub db: sqlx::PgPool,
     pub jwt: JWTConfig,
+    pub cache: Arc<CachedData>,
+
+    #[cfg(feature = "cache_sync")]
+    pub sync: Arc<CacheSyncData>,
 }
 
-impl AppState {
-    pub async fn get_db_connection(&self) -> Result<PoolConnection<Postgres>, Error> {
-        let r = self.db.acquire().await;
+pub fn init_app_state(pool: sqlx::PgPool, jwt: JWTConfig) -> AppState {
 
-        r
+    let cache = Arc::new(cache::new_cache());
+
+    #[cfg(feature = "cache_sync")]
+    let sync = Arc::new(CacheSyncData::new(cache.clone(), pool.clone()));
+
+    AppState { 
+        db: pool,
+        jwt,
+        cache,
+
+        #[cfg(feature = "cache_sync")]
+        sync,
     }
 }

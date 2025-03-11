@@ -1,0 +1,53 @@
+/* TU Ilmenau theme customization */
+:root {
+  --tui-primary: #00747A;
+  --tui-primary-hover: #005F63;
+  --tui-primary-active: #004D50;
+  --tui-primary-disabled: #80B9BC;
+  --bs-primary-rgb: 0,116,122;
+
+  --bs-primary: var(--tui-primary);
+}
+/* Dark Theme Overrides */
+[data-bs-theme="dark"] {
+  --tui-primary: #00747A;
+  --tui-primary-hover: #005F63;
+  --tui-primary-active: #004D50;
+  --tui-primary-disabled: #80B9BC;
+  --bs-primary-rgb: 0,116,122;
+
+  --bs-primary: var(--tui-primary);
+}
+
+/* Btn Overrides */
+.btn-primary {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--tui-primary);
+  --bs-btn-border-color: var(--tui-primary);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--tui-primary-hover);
+  --bs-btn-hover-border-color: var(--tui-primary-hover);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--tui-primary-active);
+  --bs-btn-active-border-color: var(--tui-primary-active);
+  --bs-btn-disabled-color: #fff;
+  --bs-btn-disabled-bg: var(--tui-primary-disabled);
+  --bs-btn-disabled-border-color: var(--tui-primary-disabled);
+}
+.btn-outline-primary {
+  --bs-btn-color: var(--tui-primary);
+  --bs-btn-border-color: var(--tui-primary);
+  --bs-btn-hover-bg: var(--tui-primary);
+  --bs-btn-hover-border-color: var(--tui-primary);
+  --bs-btn-active-bg: var(--tui-primary);
+  --bs-btn-active-border-color: var(--tui-primary);
+  --bs-btn-disabled-color: var(--tui-primary);
+  --bs-btn-disabled-border-color: var(--tui-primary-disabled);
+}
+
+/* Custom width for desktop (1/3 of the screen) */
+@media (min-width: 992px) {
+  #offcanvasEnd {
+    width: 33.33%; /* 1/3 of the screen width */
+  }
+}

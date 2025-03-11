@@ -1,0 +1,17 @@
+{
+  "id":"/sbmi-pwa/v1",
+  "short_name": "SBMI",
+  "name": "SensBee Management Inteface",
+  "background_color": "#003359",
+  "theme_color": "#003359",
+  "icons": [
+    { "src": "/img/favicon.ico", "type": "image/x-icon", "sizes": "16x16 32x32" },
+    { "src": "/img/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/img/icon-512.png", "type": "image/png", "sizes": "512x512" },
+    { "src": "/img/icon-192-maskable.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "/img/icon-512-maskable.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ],
+  "start_url": "index.html",
+  "display": "standalone",
+  "shortcuts" : []
+}

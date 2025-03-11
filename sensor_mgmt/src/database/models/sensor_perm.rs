@@ -8,7 +8,8 @@ use utoipa::ToSchema;
 pub struct SensorPermission {
     #[schema(schema_with = uuid_schema)]
     pub sensor_id: Uuid,
-    pub role_id: i32,
+    #[schema(schema_with = uuid_schema)]
+    pub role_id: Uuid,
     pub allow_info: bool,
     pub allow_read: bool,
     pub allow_write: bool,

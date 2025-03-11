@@ -6,7 +6,7 @@ use env_logger::Env;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 
-use sensor_mgmt::state::{AppState, JWTConfig};
+use sensor_mgmt::state::{init_app_state, JWTConfig};
 use sensor_mgmt::handler as handler;
 
 use utoipa::OpenApi;
@@ -15,6 +15,7 @@ use utoipa_swagger_ui::SwaggerUi;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        sensor_mgmt::handler::main_hdl::api_base_handler,
         sensor_mgmt::handler::main_hdl::health_checker_handler,
 
         sensor_mgmt::handler::auth_hdl::login_user_handler,
@@ -27,13 +28,16 @@ use utoipa_swagger_ui::SwaggerUi;
         sensor_mgmt::handler::sensor_hdl::delete_sensor_handler,
         sensor_mgmt::handler::sensor_hdl::create_sensor_api_key_handler,
         sensor_mgmt::handler::sensor_hdl::delete_sensor_api_key_handler,
-        sensor_mgmt::handler::sensor_hdl::ingest_data_handler,
-        sensor_mgmt::handler::sensor_hdl::get_data_handler,
+
+        sensor_mgmt::handler::data_hdl::ingest_sensor_data_handler,
+        sensor_mgmt::handler::data_hdl::get_sensor_data_handler,
 
         sensor_mgmt::handler::user_hdl::list_users_handler,
         sensor_mgmt::handler::user_hdl::register_user_handler,
         sensor_mgmt::handler::user_hdl::verify_user_handler,
         sensor_mgmt::handler::user_hdl::get_user_info_handler,
+        sensor_mgmt::handler::user_hdl::edit_user_info_handler,
+        sensor_mgmt::handler::user_hdl::edit_user_security_password_handler,
         sensor_mgmt::handler::user_hdl::delete_user_handler,
         sensor_mgmt::handler::user_hdl::assign_role_handler,
         sensor_mgmt::handler::user_hdl::revoke_role_handler,
@@ -52,6 +56,8 @@ struct ApiDoc;
 async fn main() -> std::io::Result<()> { 
     println!(" ____                 ____            \n/ ___|  ___ _ __  ___| __ )  ___  ___ \n\\___ \\ / _ \\ '_ \\/ __|  _ \\ / _ \\/ _ \\\n ___) |  __/ | | \\__ \\ |_) |  __/  __/\n|____/ \\___|_| |_|___/____/ \\___|\\___|");
     println!();
+    println!("v {}", std::option_env!("CARGO_PKG_VERSION").unwrap_or("NOT_SET"));
+    println!("Compiled using Rust {} on {}.", compile_time::rustc_version_str!(), compile_time::datetime_str!());
 
     env_logger::init_from_env(Env::default().default_filter_or("info"));
     let openapi = ApiDoc::openapi();
@@ -112,11 +118,12 @@ async fn main() -> std::io::Result<()> {
             header::AUTHORIZATION,
             header::ACCEPT,
         ])
-        .supports_credentials();
+        .supports_credentials()
+        .allow_any_origin();
         App::new()
             .wrap(Logger::default())
             .wrap(Logger::new("%a %{User-Agent}i"))
-            .app_data(Data::new(AppState { db: pool.clone(), jwt: JWTConfig::init() }))
+            .app_data(Data::new(init_app_state(pool.clone(), JWTConfig::init())))
             .configure(handler::main_hdl::config)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),

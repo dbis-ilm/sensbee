@@ -7,11 +7,10 @@ use anyhow::Result;
 use comfy_table::Table;
 use uuid::Uuid;
 use once_cell::unsync::Lazy;
-use sqlx::postgres::any::AnyConnectionBackend;
-use sensor_mgmt::state::{AppState, JWTConfig};
-use sensor_mgmt::{database::user_db as user_db};
+use sensor_mgmt::state::{init_app_state, AppState, JWTConfig};
+use sensor_mgmt::database::user_db as user_db;
 use sensor_mgmt::database::role_db;
-use sensor_mgmt::handler::models::requests::{RegisterUserRequest};
+use sensor_mgmt::handler::models::requests::RegisterUserRequest;
 
 // TODO: Long-Term we should not modify the DB directly but rather call designated API paths in cli handler
 //       (To avoid dealing with invalid caches or left-over sensor threads / tasks [mqtt] manually)
@@ -56,16 +55,16 @@ enum Commands {
     ListRoles,
 
     DeleteRole {
-        name: String,
+        role_id: Uuid,
     },
 
     AssignRole {
-        role_name: String,
+        role_id: Uuid,
         user_id: Uuid,
     },
 
     RevokeRole {
-        role_name: String,
+        role_id: Uuid,
         user_id: Uuid,
     }
 }
@@ -93,7 +92,7 @@ async fn list_users(state: &AppState) -> Result<()> {
 
     let info = user_db::user_list(&state).await?;
 
-    let mut con = state.get_db_connection().await?;
+    let mut con = state.db.begin().await?;
     
     for user in info {
         let roles = role_db::get_user_roles(user.id, con.as_mut()).await?;
@@ -103,7 +102,7 @@ async fn list_users(state: &AppState) -> Result<()> {
         table.add_row(vec![user.name, user.email, user.verified.to_string(), user.id.to_string(), roles.join(",")]);
     }
     
-    let _ = con.commit();
+    let _ = con.commit().await;
     
     println!("{table}");
 
@@ -143,24 +142,24 @@ async fn list_roles(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-async fn delete_role(role_name: String, state: &AppState) -> Result<()> {
-    role_db::delete_role(role_name, true, &state).await?;
+async fn delete_role(role_id: Uuid, state: &AppState) -> Result<()> {
+    role_db::delete_role(role_id, true, &state).await?;
 
     notify_cache_clear();
 
     Ok(())
 }
 
-async fn assign_role(role_name: String, user_id: Uuid, state: &AppState) -> Result<()> {
-    role_db::assign_role_by_name(user_id, role_name, true,  &state).await?;
+async fn assign_role(role_id: Uuid, user_id: Uuid, state: &AppState) -> Result<()> {
+    role_db::assign_role(user_id, role_id, true,  &state).await?;
 
     notify_cache_clear();
 
     Ok(())
 }
 
-async fn revoke_role(role_name: String, user_id: Uuid, state: &AppState) -> Result<()> {
-    let _ = role_db::revoke_role(user_id, role_name, true, &state).await?;
+async fn revoke_role(role_id: Uuid, user_id: Uuid, state: &AppState) -> Result<()> {
+    let _ = role_db::revoke_role(user_id, role_id, true, &state).await?;
 
     notify_cache_clear();
 
@@ -213,7 +212,7 @@ async fn main() {
         }
     };
     
-    let state = AppState{ db: pool.clone(), jwt: JWTConfig::init() };
+    let state = init_app_state(pool.clone(), JWTConfig::init() );
 
     match cli.cmd {
         Commands::AddUser { name, email, password, admin  } => {
@@ -224,8 +223,8 @@ async fn main() {
 
         Commands::CreateRole {name} => { parse_result(create_role(name, &state).await); }
         Commands::ListRoles => { parse_result(list_roles(&state).await); }
-        Commands::DeleteRole {name} => { parse_result(delete_role(name, &state).await); }
-        Commands::AssignRole {role_name, user_id} => { parse_result(assign_role(role_name, user_id, &state).await); }
-        Commands::RevokeRole {role_name, user_id} => { parse_result(revoke_role(role_name, user_id, &state).await); }
+        Commands::DeleteRole {role_id} => { parse_result(delete_role(role_id, &state).await); }
+        Commands::AssignRole {role_id, user_id} => { parse_result(assign_role(role_id, user_id, &state).await); }
+        Commands::RevokeRole {role_id, user_id} => { parse_result(revoke_role(role_id, user_id, &state).await); }
     }
 }
