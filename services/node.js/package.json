@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "name": "app",
+  "version": "1.0.0",
+  "description": "SensBee data ingest transformation service",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "DBIS@TU Ilmenau",
+  "license": "MIT License",
+  "dependencies": {
+    "isolated-vm": "^6.0.0",
+    "ws": "^8.18.2"
+  }
+}

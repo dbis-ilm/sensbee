@@ -1,0 +1,34 @@
+#
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp/tempo:
+    endpoint: grafana-tempo:4317
+    tls:
+      insecure: true
+  otlphttp:
+    endpoint: http://grafana-loki:3100/otlp
+    tls:
+      insecure: true
+
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp/tempo, debug]
+    logs:
+      receivers: [otlp]
+      exporters: [otlphttp, debug]
+    #metrics:
+    #  receivers: [otlp]
+    #  exporters: [otlp]

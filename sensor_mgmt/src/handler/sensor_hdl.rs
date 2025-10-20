@@ -1,28 +1,36 @@
-use actix_web::{delete, get, post, web, Responder};
-use serde_json::{json,Value};
+use actix_web::{delete, get, post, web, HttpResponse, Responder};
+use crate::database::models::data_chain::DataChain;
 use crate::database::models::db_structs::DBOperation;
 use crate::database::models::sensor::ShortSensorInfo;
 use crate::database::sensor_db::{create_sensor, delete_sensor, edit_sensor, get_sensor_overview};
 use crate::handler::{main_hdl, policy};
 use crate::authentication::jwt_auth;
 use crate::database::models::api_key::ApiKey;
-use crate::database::sensor_db;
+use crate::database::{data_chain_db, sensor_db};
 use crate::features::cache;
 use crate::handler::policy::unauthorized;
-use crate::handler::models::requests::{CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest};
+use crate::handler::models::requests::{CreateApiKeyRequest, CreateSensorRequest, EditSensorRequest, SetDataChainRequest};
 use crate::handler::models::responses::{GenericUuidResponse, SensorDetailResponse};
-use crate::features::user_sens_perm::UserSensorPerm;
+use crate::features::user_sens_perm::{UserSensorPerm};
 use crate::state::AppState;
+use crate::utils::AppError;
 
+/* ------------------------------------------------ Sensors -------------------------------------------------- */
+
+const COMMON_TAG: &str = "Sensors";
+
+// TODO flag for full info
+// TODO body can also be something else?
+// Naja mit nur dem flag geht das nicht weil api_keys ... und den anderen umbauen geht auch nicht weil ja ID im Pfad
+// ... mhm
 #[utoipa::path(
     get,
     path = "/api/sensors/list",
-    tag = "Sensors",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description= "Return list of accessible sensors.", body = Vec<ShortSensorInfo>),
     )
 )]
-
 #[get("/sensors/list")]
 async fn list_sensors_handler(data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -67,7 +75,7 @@ async fn list_sensors_handler(data: web::Data<AppState>, jwt: jwt_auth::JwtMiddl
 #[utoipa::path(
     get,
     path = "/api/sensors/{id}/info",
-    tag = "Sensors",
+    tag = COMMON_TAG,
     params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
     responses(
         (status = 200, description= "Detailed information about the specified sensor.", body = SensorDetailResponse),
@@ -75,7 +83,6 @@ async fn list_sensors_handler(data: web::Data<AppState>, jwt: jwt_auth::JwtMiddl
         (status = 500, description= "Returns an error if the sensor does not exist."),
     )
 )]
-
 #[get("/sensors/{id}/info")]
 async fn get_sensor_info_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -121,7 +128,6 @@ async fn get_sensor_info_handler(path: web::Path<uuid::Uuid>, data: web::Data<Ap
     let api_keys = match user_id {
         Some(id) => {
             let api_res = sensor_db::get_api_keys(sensor_id, id, &data).await;
-
             if api_res.is_err() {
                 return main_hdl::send_result(&api_res);
             }
@@ -147,16 +153,15 @@ async fn get_sensor_info_handler(path: web::Path<uuid::Uuid>, data: web::Data<Ap
         content_type = "application/json",
         content = CreateSensorRequest,
         description = "Description of the sensor.",
-        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ","WRITE"]}],"columns":[{"name":"count","val_type":"INT","val_unit":"number"},{"name":"temperature","val_type":"FLOAT","val_unit":"celsius"}], "storage": {"variant": "DEFAULT", "params": {}}}),
+        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_id":"72122092-1154-4189-8dde-d72b663b55eb","operations":["INFO","READ","WRITE"]}],"columns":[{"name":"count","val_type":"INT","val_unit":"number","val_ingest":"INCREMENTAL"},{"name":"temperature","val_type":"FLOAT","val_unit":"celsius","val_ingest":"LITERAL"}], "storage": {"variant": "DEFAULT", "params": {}}}),
     ),
-    tag = "Sensors",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Sensor id (uuid) of the newly registered sensor.", body = GenericUuidResponse),
         (status = 401, description= "Returns an unauthorized error if no valid token was provided."),
     ),
     security(("JWT" = [])),
 )]
-
 #[post("/sensors/create")]
 async fn create_sensor_handler(body: web::Json<CreateSensorRequest>, data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -179,10 +184,10 @@ async fn create_sensor_handler(body: web::Json<CreateSensorRequest>, data: web::
         content_type = "application/json",
         content = EditSensorRequest,
         description = "Description of the sensor.",
-        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_name":"user","operations":["INFO","READ"]}], "storage": {"variant": "DEFAULT", "params": {}}}),
+        example = json!({"name":"MySensor","description":"This is my first sensor.","position":[50.68322,10.91858],"permissions":[{"role_id":"72122092-1154-4189-8dde-d72b663b55eb","operations":["INFO","READ"]}], "storage": {"variant": "DEFAULT", "params": {}}}),
     ),
     params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
-    tag = "Sensors",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the edit was successful."),
         (status = 401, description= "Returns an unauthorized error if no valid admin or owner token was provided."),
@@ -190,7 +195,6 @@ async fn create_sensor_handler(body: web::Json<CreateSensorRequest>, data: web::
     ),
     security(("JWT" = [])),
 )]
-
 #[post("/sensors/{id}/edit")]
 async fn edit_sensor_handler(path: web::Path<uuid::Uuid>, body: web::Json<EditSensorRequest>, data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -210,8 +214,8 @@ async fn edit_sensor_handler(path: web::Path<uuid::Uuid>, body: web::Json<EditSe
 #[utoipa::path(
     delete,
     path = "/api/sensors/{id}/delete",
-    params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
-    tag = "Sensors",
+    params( ("id" = Uuid, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the deletion was successful."),
         (status = 401, description= "Returns an unauthorized error if no valid admin or owner token was provided."),
@@ -219,7 +223,6 @@ async fn edit_sensor_handler(path: web::Path<uuid::Uuid>, body: web::Json<EditSe
     ),
     security(("JWT" = [])),
 )]
-
 #[delete("/sensors/{id}/delete")]
 async fn delete_sensor_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -238,6 +241,8 @@ async fn delete_sensor_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppS
 
 /* ---------------------------------------------------API Keys ---------------------------------------------------------------- */
 
+const API_KEY_OPENAPI_COMMON_TAG: &str = "Sensors / API Key";
+
 #[utoipa::path(
     post,
     path = "/api/sensors/{id}/api_key/create",
@@ -248,7 +253,7 @@ async fn delete_sensor_handler(path: web::Path<uuid::Uuid>, data: web::Data<AppS
         description = "Description of the api key.",
         example = json!({"name":"MyKey","operation":DBOperation::READ}),
     ),
-    tag = "Sensors",
+    tag = API_KEY_OPENAPI_COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the api key was created.", body = ApiKey),
         (status = 401, description= "Returns an unauthorized error if no permissions to create an api key."),
@@ -284,7 +289,7 @@ async fn create_sensor_api_key_handler(path: web::Path<uuid::Uuid>, body: web::J
         ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string())),
         ("key_id" = String, Path, description = "The uuid of the key", example = json!(uuid::Uuid::new_v4().to_string()))
     ),
-    tag = "Sensors",
+    tag = API_KEY_OPENAPI_COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the api key was deleted."),
         (status = 401, description= "Returns an unauthorized error if no permissions to delete the api key."),
@@ -329,17 +334,111 @@ async fn delete_sensor_api_key_handler(path: web::Path<(uuid::Uuid, uuid::Uuid)>
     main_hdl::send_result(&res)
 }
 
+/* ------------------------------------------------ Data chains -------------------------------------------------- */
+
+const DATA_CHAIN_OPENAPI_COMMON_TAG: &str = "Sensors / Data Chain";
+
+#[utoipa::path(
+    get,
+    path = "/api/sensors/{id}/data_chain/load",
+    params( ("id" = String, Path, description = "The uuid of the sensor", example = json!(uuid::Uuid::new_v4().to_string()))),
+    tag = DATA_CHAIN_OPENAPI_COMMON_TAG,
+    responses(
+        (status = 200, description= "TODO", body = DataChain),
+    ),
+    security(("JWT" = [])),
+)]
+
+#[get("/sensors/{id}/data_chain/load")]
+async fn load_data_chain_handler(path: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> HttpResponse {
+
+    let user_id = jwt.user_id;
+    let sensor_id = path.into_inner();
+
+    let login_id = policy::require_login(user_id, &state).await.map_or(user_id, |_| None);
+    if login_id.is_none() {
+        return AppError::unauthorized("must be logged in".to_string()).err().unwrap().into();
+    }
+
+    let res = data_chain_db::load(sensor_id, &state.db.clone()).await;
+
+    main_hdl::send_result(&res)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/sensors/{id}/data_chain/set",
+    request_body(
+        content_type = "application/json",
+        content = SetDataChainRequest,
+        description = "TODO",
+    ),
+    tag = DATA_CHAIN_OPENAPI_COMMON_TAG,
+    responses(
+        (status = 200, description = "Returns ok if the data transformation script was created for the given sensor."),
+        (status = 401, description= "Returns an unauthorized error if the request has no permissions to create a data transformation script."),
+        (status = 500, description= "Returns an error if the data transformation script couldn't be created."),
+    ),
+    security(("JWT" = [])),
+)]
+
+#[post("/sensors/{id}/data_chain/set")]
+async fn set_data_chain_handler(path: web::Path<uuid::Uuid>,body: web::Json<SetDataChainRequest>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
+    
+    let user_id = jwt.user_id;
+    let sensor_id = path.into_inner();
+    let req = body.into_inner();
+
+    // This requires login
+    let login_id = policy::require_login(user_id, &state).await.map_or(user_id, |_| None);
+    if login_id.is_none() {
+        return AppError::unauthorized("must be logged in".to_string());
+    }
+
+    data_chain_db::set(sensor_id, &req.chain, &state.db).await
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/sensors/{id}/data_chain/delete",
+    params( 
+        ("id" = String, Path, description = "The uuid of the event handler that should be removed.", example = json!(uuid::Uuid::new_v4().to_string()))
+    ),
+    tag = DATA_CHAIN_OPENAPI_COMMON_TAG,
+    responses(
+        (status = 200, description = "Returns ok if the data transformation script was deleted."),
+        (status = 401, description= "Returns an unauthorized error if the request has no permissions to delete the data transformation script for the sensor."),
+        (status = 500, description= "Returns an error if the api key couldn't be deleted."),
+    ),
+    security(("JWT" = [])),
+)]
+
+#[delete("/sensors/{id}/data_chain/delete")]
+async fn delete_data_chain_handler(path: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
+
+    let user_id = jwt.user_id;
+    let sensor_id = path.into_inner();
+
+    let login_id = policy::require_login(user_id, &state).await.map_or(user_id, |_| None);
+    if login_id.is_none() {
+        return AppError::unauthorized("must be logged in".to_string());
+    }
+
+    data_chain_db::delete(sensor_id, &state.db).await
+}
+
 /* ------------------------------------------------ Tests ------------------------------------------------------------ */
 
 #[cfg(test)]
 pub mod tests {
+    use serde_json::{json,Value};
     use actix_http::Method;
     use actix_web::http::StatusCode;
     use super::*;
     use sqlx::PgPool;
     use uuid::Uuid;
     use crate::database::models::role::{ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_USER};
-    use crate::database::models::sensor::{ColumnType, SensorColumn};
+    use crate::database::models::sensor::{ColumnIngest, ColumnType, SensorColumn};
     use crate::database::role_db;
     use crate::features::sensor_data_storage::{SensorDataStorageCfg, SensorDataStorageType};
     use crate::handler::models::requests::SensorPermissionRequest;
@@ -370,7 +469,7 @@ pub mod tests {
 
         // --- List sensors of John Doe with his login - should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let body = execute_request("/api/sensors/list", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
@@ -394,7 +493,7 @@ pub mod tests {
 
         role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
-        let token = login(&anne().email, &anne().password, &app).await;
+        let token = login(&anne(), &state).await;
 
         let body = execute_request("/api/sensors/list", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
@@ -430,9 +529,26 @@ pub mod tests {
 
         test_invalid_auth(format!("/api/sensors/{}/info", &target_sensor_own.1).as_str(), Method::GET, None::<Value>, &state, &app).await;
 
+        // --- Access own sensor as Anne - should succeed ---
+
+        let token = login(&anne(), &state).await;
+
+        let body = execute_request(&format!("/api/sensors/{}/info", &target_sensor_allowed.1), Method::GET, None,
+                                   None::<Value>, Some(token.clone()),
+                                   StatusCode::OK, &app).await;
+
+        // Check if permissions are returned correctly
+
+        let sensor: SensorDetailResponse = serde_json::from_value(body).unwrap();
+
+        for perm in sensor.sensor_info.permissions.iter() {
+            assert_eq!(perm.role_id, TEST_SYS_ROLE);
+            assert!(perm.allow_info && perm.allow_read && perm.allow_write);
+        }
+
         // --- Access own sensor as John - should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let body = execute_request(&format!("/api/sensors/{}/info", &target_sensor_own.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
@@ -448,6 +564,7 @@ pub mod tests {
         assert_eq!(sensor.api_keys.len(), 2); // John has one read and one write api key
         assert_eq!(sensor.sensor_info.storage_type, SensorDataStorageType::Default);
         assert_eq!(sensor.sensor_info.storage_params, None);
+        assert!(sensor.sensor_info.permissions.is_empty()); // No permissions set in this sensor
 
         for key in sensor.api_keys.iter() { // Validate both keys
             assert!((key.operation == DBOperation::READ && key.name == "TestKeyRead" ||
@@ -519,13 +636,13 @@ pub mod tests {
                 permissions: vec![SensorPermissionRequest { role_id: ROLE_SYSTEM_USER, operations: vec![DBOperation::INFO, DBOperation::READ] }],
                 columns: vec![
                     SensorColumn {
-                        name: "col1".to_string(), val_type: ColumnType::INT, val_unit: "unit_1".to_string(),
+                        name: "col1".to_string(), val_type: ColumnType::INT, val_unit: "unit_1".to_string(), val_ingest: ColumnIngest::LITERAL
                     },
                     SensorColumn {
-                        name: "col2".to_string(), val_type: ColumnType::FLOAT, val_unit: "unit_2".to_string(),
+                        name: "col2".to_string(), val_type: ColumnType::FLOAT, val_unit: "unit_2".to_string(), val_ingest: ColumnIngest::LITERAL
                     },
                     SensorColumn {
-                        name: "col3".to_string(), val_type: ColumnType::STRING, val_unit: "unit_3".to_string(),
+                        name: "col3".to_string(), val_type: ColumnType::STRING, val_unit: "unit_3".to_string(), val_ingest: ColumnIngest::LITERAL
                     }],
                 storage: SensorDataStorageCfg { variant: SensorDataStorageType::Default, params: None }
             }
@@ -535,7 +652,7 @@ pub mod tests {
 
         // --- Create sensor as John - Should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let sensor_info = create_request("NewSensorName".to_string());
 
@@ -559,6 +676,11 @@ pub mod tests {
             && sensor.position.eq(&sensor_pos) 
             && sensor.owner.unwrap() == john().id 
             && sensor.storage_type == SensorDataStorageType::Default);
+
+        for perm in sensor.permissions.iter() {
+            assert_eq!(perm.role_id, ROLE_SYSTEM_USER);
+            assert!(perm.allow_info && perm.allow_read);
+        }
 
         // --- Create sensor again as John - Should fail ---
 
@@ -596,7 +718,7 @@ pub mod tests {
 
         // --- Edit allowed (own) sensor as anne - Should succeed ---
 
-        let anne_token = login(&anne().email, &anne().password, &app).await;
+        let anne_token = login(&anne(), &state).await;
 
         let sensor_info = edit_request("MyNewName".to_string());
 
@@ -617,7 +739,7 @@ pub mod tests {
 
         // --- Check if john is now not able anymore to read sensor info (permission removed) - Should fail ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
         
         let _ = execute_request(&format!("/api/sensors/{}/info", &target_sensor_allowed.1), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
@@ -666,7 +788,7 @@ pub mod tests {
 
         // --- Delete allowed (his own) sensor as john - Should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let _ = execute_request(&format!("/api/sensors/{}/delete", target_sensor_allowed.1), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
@@ -714,7 +836,7 @@ pub mod tests {
 
         // --- Create allowed sensor key as john - Should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let body = execute_request(&format!("/api/sensors/{}/api_key/create", target_sensor_allowed.1), Method::POST, None,
                                 Some(payload.clone()), Some(token.clone()),
@@ -770,7 +892,7 @@ pub mod tests {
 
         // --- Delete allowed sensor key as john - Should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_read_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
@@ -793,7 +915,7 @@ pub mod tests {
 
         // --- Delete not allowed key as anne - Should fail ----
 
-        let token = login(&anne().email, &anne().password, &app).await;
+        let token = login(&anne(), &state).await;
 
         let _ = execute_request(&format!("/api/sensors/{}/api_key/{}/delete", target_sensor_allowed.1, john_key_write_allowed), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),

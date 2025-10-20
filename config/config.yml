@@ -1,0 +1,56 @@
+# SensBee Server configuration file.
+#
+#
+# Options without a DEFAULT value are optional.
+#
+
+# General server options
+server:
+  # DEFAULT "localhost"
+  host: '0.0.0.0'
+
+  # DEAFULT 8080
+  #port:
+
+  # External address to reach this instance
+  # DO NOT APPEND A TRAILING SLASH
+  # DEFAULT "http://localhost:8080"
+  #external_host: ''
+
+  # Host to which this instance will redirect after succesfull OIDC authentication
+  # DEFAULT "http://localhost:8082"
+  #external_sbmi_host: ''
+
+  # Settings this to 'dev' disables additional sanity check during startup.
+  # When in 'prod' mode the server does not start when default jwt keys are used.
+  run_mode: 'dev'
+
+  # DEFAULT 256
+  #ingest_max_size_kb: 10485760
+
+# Authentication options
+auth:
+  # JWT Options
+  #jwt:
+
+  # minutes?
+  # -1 for never expires
+  # DEFAULT 43200
+  # max_age:
+
+  # Governs if a new Authenticated user will also be directly verified
+  # DEFAULT: false
+  default_verified: true
+
+  # OpenID Connect options
+  # Dont forget to set the 'external_host' if required!
+  oidc_clients:
+    # Any OIDC requries the following values. You can add multiple here.
+    #- name: ''
+    #  issuer_url: ''
+    #  client_id: ''
+    #  client_secret: ''
+
+  # If a OIDC auth returns this email the resulting user will
+  # get the admin and root role.
+  root_user_email: 'sensbee@local.dev'

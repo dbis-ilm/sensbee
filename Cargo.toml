@@ -2,7 +2,9 @@
 members = [
     "sensor_mgmt",
     "server",
-    "cli"
+    "event_handling",
+    "sbc",
+    "openapi",
 ]
 
 resolver = "2"

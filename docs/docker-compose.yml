@@ -1,0 +1,16 @@
+# A compose stack to start documentation services
+
+services:
+  # Swagger UI
+  openapi:
+    container_name: "SensBee-OpenAPI"
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+      target: openapi
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+  # Sphinx based Documentation
+  #
+  # Consult the README.md on how to access the documentation.

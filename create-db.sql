@@ -1,3 +1,0 @@
-CREATE DATABASE testdb;
-CREATE USER dev WITH PASSWORD 'my_secret2';
-ALTER DATABASE testdb OWNER TO dev;

@@ -1,6 +1,10 @@
-pub mod user_sens_perm;
-pub mod sensor_data_storage;
 pub mod cache;
-
 #[cfg(feature = "cache_sync")]
 pub mod cache_sync;
+pub mod config;
+pub mod event_generation;
+pub mod sensor_col_ingest;
+pub mod sensor_data_storage;
+pub mod sensor_data_transform;
+pub mod telemetry;
+pub mod user_sens_perm;

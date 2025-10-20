@@ -1,0 +1,13 @@
+[package]
+name = "sb_openapi"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+sensor_mgmt = { path = "../sensor_mgmt" }
+
+actix-web = "4"
+actix-cors = "0.7.0"
+utoipa = { version = "5.3.1", features = ["chrono", "actix_extras"] }
+utoipa-swagger-ui = { version = "9.0.1", features = ["actix-web"] }
+compile-time = "0.2.0"

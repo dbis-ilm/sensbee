@@ -1,102 +1,141 @@
-# This docker compose file is intended to be used for development 
+# This docker compose file is intended to be used for 
+#   
+#   DEVELOPMENT 
+#
+# Do NOT use this for PRODUCTION deployments!
+#
 # Simply running 
 #   docker compose up -d 
 # should bring up all relevant services
 #
-# NOTE: The Dockerfile uses your local rust installation!
 
-services:  # Define the services to run
-  sb-postgres:  # PostgreSQL service
-    image: postgres:17-alpine  # Use the PostgreSQL image from Docker Hub
-    container_name: postgres  # Assign a name to the container
-    restart: always
-    profiles:
-      - runtime
-    environment:  # Set environment variables for PostgreSQL
+services:
+  # Define the services to run
+  sb-postgres:
+    # PostgreSQL service
+    image: postgres:17-alpine # Use the PostgreSQL image from Docker Hub
+    container_name: postgres # Assign a name to the container
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+    environment:
+      # Set environment variables for PostgreSQL
+      # If no database exists, postgres will create the db with the given user as owner.
+      # sqlx will then apply all migrations which in turn creates the expected database schema and default data
       POSTGRES_USER: ${PSQL_USER}
       POSTGRES_PASSWORD: ${PSQL_PASSWORD}
       POSTGRES_DB: ${PSQL_DATABASE}
-    volumes:  # Create a volume to store PostgreSQL data
-      - postgres:/var/lib/postgresql/data
-      # Start script for creating the database.
-      - ./create-db.sql:/docker-entrypoint-initdb.d/create_database.sql
-      # OPTIONAL Example data
-      - ./example:/example/
-    networks:
-      - "sb-net"
-    healthcheck:  # Define a health check for the container
-      test: ["CMD", "pg_isready", "-h", "postgres", "-U", "${PSQL_USER}"]
+    volumes:
+      # Create a volume to store PostgreSQL data
+      - postgres_sb:/var/lib/postgresql/data
+    healthcheck:
+      # Define a health check for the container
+      test: [ "CMD", "pg_isready", "-h", "postgres", "-U", "${PSQL_USER}" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  sb-pgadmin:  # pgAdmin service
-    image: dpage/pgadmin4  # Use the pgAdmin image from Docker Hub
-    profiles:
-      - runtime
-    container_name: pgadmin  # Assign a name to the container
-    ports:
-      - "8084:80"
-    environment:  # Set environment variables for pgAdmin
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
-      PGADMIN_LISTEN_PORT: ${PGADMIN_LISTEN_PORT}
-    volumes:  # Create a volume to store pgAdmin data
-      - pgadmin-data:/var/lib/pgadmin
-    networks:
-      - "sb-net"
-    restart: always  # Restart the container if it stops
-    depends_on:  # Specify that this service depends on the PostgreSQL service
-      - sb-postgres
-
-  sb-build-db:
-    image: postgres:17-alpine
-    profiles:
-      - precompile
-    network_mode: host
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pw
-      POSTGRES_DB: builddb
-  
   sb-sensbee:
+    profiles: [ 'full' ]
     container_name: sensbee
     build:
       context: .
       dockerfile: Dockerfile
-      network: host
-      # NOTE this is just used during build for sqlx migration testing
-      args:
-        - DATABASE_URL=postgres://user:pw@localhost:5432/builddb
-    profiles:
-      - runtime
+      target: server
     depends_on:
       - sb-postgres
-    networks:
-      - "sb-net"
+    volumes:
+      - ./config/:/etc/sensbee/:ro
     ports:
       - "8080:8080"
     restart: unless-stopped
     env_file:
       - .env
-  
-  sb-SBMI-nginx:
+
+  # The admin interface for SensBee
+  sb-service-SBMI:
     image: nginx:alpine
-    profiles:
-      - runtime
     container_name: sbmi
     ports:
-      - "8082:80"
+      - "8082:80" # Should use 443 when used in prod
     volumes:
-      - ./sbmi/static/:/usr/share/nginx/html/:ro
-      - ./sbmi/nginx/nginx-no-cache.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - "sb-net"
+      - ./services/sbmi/static/:/usr/share/nginx/html/:ro
+      - ./services/sbmi/nginx/nginx-no-cache.conf:/etc/nginx/nginx.conf:ro
 
-volumes:  # Define named volumes for data storage
-  postgres:
-  pgadmin-data:
+  # MQTT broker
+  sb-service-mosquitto:
+    container_name: mosquitto
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883" # TCP clients
+      - "9001:9001" # WebSocket clients
+    volumes:
+      - ./services/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    environment:
+      - TZ=${TZ}
+    restart: unless-stopped
+
+  # Data transformation service
+  sb-service-transform:
+    container_name: data-transform
+    build:
+      context: ./services/node.js
+      dockerfile: Dockerfile
+    ports:
+      - 9002:9002
+    volumes:
+      - ./services/node.js/test.js:/usr/src/app/test.js
+    restart: unless-stopped
+
+  # Event handler service
+  sb-service-event-handler:
+    container_name: sensbee-event-handler
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: event_handler
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  ##########
+  # CI 
+  sb-ci-testing:
+    container_name: ci-test
+    profiles: [ 'ci' ]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ci_test
+    volumes:
+      - ./:/app
+    environment:
+      - DATABASE_URL=postgres://${PSQL_USER}:${PSQL_PASSWORD}@postgres:5432/${PSQL_DATABASE}
+    env_file:
+      - .env
+
+  #################
+  # OTel collector
+  sb-service-otel-collector:
+    container_name: otel-collector
+    image: otel/opentelemetry-collector-contrib
+    command: [ "--config=/etc/otel-collector.yaml" ]
+    restart: unless-stopped
+    volumes:
+      - "./services/grafana/otel-collector-config.yaml:/etc/otel-collector.yaml:ro"
+    networks:
+      - "otel-net" # Connect to the external grafana stack
+      - "default" # All services in this compose can talk to the collector
+    ports:
+      - 4318:4318
+
+volumes:
+  # A named volume for the database.
+  postgres_sb:
+
 
 networks:
-  sb-net:
-    driver: bridge
+  # Named networks to be shared between compose stacks
+  # This is used by the otel stack.
+  otel-net:
+    name: "otel-net"

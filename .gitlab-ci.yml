@@ -1,52 +1,28 @@
-image: "rust:latest"
+default:
+  image: docker:28.3.2
+  services:
+    - docker:28.3.2-dind
+
+# This builds all necessary container for the whole setup
+before_script:
+  - docker compose up -d
 
 stages:
-  - test:cargo
-  - test:coverage
+  - all_in_one
 
-# Use cargo to test the project
-test:cargo:
-  stage: test:cargo
-  tags:
-    - grouprunner
-  services: 
-    - postgres:latest
-  variables:
-    # Configure postgres service (https://hub.docker.com/_/postgres/)
-    POSTGRES_DB: testdb
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: my_secret
-    POSTGRES_HOST_AUTH_METHOD: trust
-    DATABASE_URL: postgres://postgres:my_secret@postgres:5432/testdb
+all_in_one:
+  stage: all_in_one
   script:
-    - rustc --version && cargo --version  # Print version info for debugging
-    - cargo install sqlx-cli
-    - sqlx migrate run
-    - cargo build
-    - cargo test --workspace
-
-test:coverage:
-  stage: test:cargo
-  tags:
-    - grouprunner
-  services: 
-    - postgres:latest
-  variables:
-    # Configure postgres service (https://hub.docker.com/_/postgres/)
-    POSTGRES_DB: testdb
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: my_secret
-    POSTGRES_HOST_AUTH_METHOD: trust
-    DATABASE_URL: postgres://postgres:my_secret@postgres:5432/testdb
+    - docker compose --profile ci up -d
+    # Run all tests and generates coverage
+    - docker exec ci-test sh -c "cargo tarpaulin --ignore-tests --engine Llvm --out xml"
+  # Code coverage related settings
   coverage: '/^\d+.\d+% coverage/'
-  script:
-    - rustc --version && cargo --version  # Print version info for debugging
-    - cargo install sqlx-cli cargo-tarpaulin
-    - sqlx migrate run
-    - cargo build
-    - cargo tarpaulin --ignore-tests --engine Llvm --out xml
   artifacts:
     reports:
       coverage_report:
         coverage_format: cobertura
         path: cobertura.xml
+
+after_script:
+  - docker compose down --volumes --remove-orphans

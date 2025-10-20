@@ -2,3 +2,5 @@
 Cargo.lock
 .*
 !.sqlx
+node_modules
+.local

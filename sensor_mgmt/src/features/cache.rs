@@ -1,20 +1,20 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use crate::database::models::api_key::ApiKey;
 use crate::database::models::role::Role;
 use crate::database::models::sensor::FullSensorInfo;
-use crate::database::{role_db, sensor_db, user_db};
-use crate::database::models::api_key::ApiKey;
 use crate::database::models::user::UserInfo;
+use crate::database::{role_db, sensor_db, user_db};
 use crate::state::AppState;
 use derive_more::derive::Display;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::RwLock;
+use uuid::Uuid;
 
 #[cfg(feature = "cache_sync")]
 use super::cache_sync;
 
 // Thread-safe data cache across the application
-// It must be ensured, that the locks are not held across await points, since this is not a 
+// It must be ensured, that the locks are not held across await points, since this is not a
 // Send+Sync safe implementation for processing across different threads/tasks.
 
 /* ------------------------------------------------------------------------------------------------- */
@@ -44,7 +44,7 @@ pub struct CachedData {
 }
 
 pub fn new_cache() -> CachedData {
-    CachedData{
+    CachedData {
         roles: RwLock::default(),
         users: RwLock::default(),
         sensors: RwLock::default(),
@@ -82,7 +82,6 @@ pub async fn request_role(role_id: uuid::Uuid, state: &AppState) -> Option<Role>
 
         Some(role)
     }
-    
 }
 
 pub fn purge_role(role_id: uuid::Uuid, state: &AppState) {
@@ -91,17 +90,16 @@ pub fn purge_role(role_id: uuid::Uuid, state: &AppState) {
 
     // If synced caching is enabled we need to instead purge the value from all caches
     #[cfg(feature = "cache_sync")]
-    state.sync.send(MapType::Roles, role_name);
+    state.sync.send(MapType::Roles, role_id.to_string());
 }
 
 pub fn purge_all_roles(state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.roles.write().unwrap().clear();
 
-    #[cfg(feature = "cache_sync")] 
+    #[cfg(feature = "cache_sync")]
     state.sync.send(MapType::Roles, "".to_owned());
 }
-
 
 /* ------------------------------------------- User Info -------------------------------------------------- */
 
@@ -121,7 +119,7 @@ pub async fn request_user(user_id: Uuid, state: &AppState) -> Option<UserInfo> {
     let mut con = state.db.begin().await.unwrap();
 
     let u = user_db::get_user_info(user_id, con.as_mut()).await;
-    
+
     let _ = con.commit().await;
 
     if u.is_err() {
@@ -143,7 +141,7 @@ pub fn purge_user(user_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.users.write().unwrap().remove(&user_id);
 
-    #[cfg(feature = "cache_sync")] 
+    #[cfg(feature = "cache_sync")]
     state.sync.send(MapType::Users, user_id.to_string());
 }
 
@@ -151,10 +149,9 @@ pub fn purge_all_users(state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.users.write().unwrap().clear();
 
-    #[cfg(feature = "cache_sync")] 
+    #[cfg(feature = "cache_sync")]
     state.sync.send(MapType::Users, "".to_owned());
 }
-
 
 /* --------------------------------------------- Sensors ----------------------------------------------------- */
 
@@ -170,7 +167,7 @@ pub async fn request_sensor(sensor_id: Uuid, state: &AppState) -> Option<FullSen
     }
 
     // Otherwise, fetch sensor from DB and insert them into the cache
-    
+
     let mut con = state.db.begin().await.unwrap();
 
     let sp = sensor_db::get_full_sensor_info(sensor_id, con.as_mut()).await;
@@ -196,32 +193,44 @@ pub fn purge_sensor(sensor_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.sensors.write().unwrap().remove(&sensor_id);
 
-    #[cfg(feature = "cache_sync")] 
-    state.sync.send(MapType::Sensors, serde_json::to_string(&cache_sync::SensorPurgeEvent{
-        is_sensor_id: true,
-        key: sensor_id,
-    }).unwrap());
+    #[cfg(feature = "cache_sync")]
+    state.sync.send(
+        MapType::Sensors,
+        serde_json::to_string(&cache_sync::SensorPurgeEvent {
+            is_sensor_id: true,
+            key: sensor_id,
+        })
+        .unwrap(),
+    );
 }
 
 pub fn purge_sensors_owned_by(user_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
-    state.cache.sensors.write().unwrap().retain(|_, s| s.owner.is_none() || s.owner.unwrap() != user_id);
+    state
+        .cache
+        .sensors
+        .write()
+        .unwrap()
+        .retain(|_, s| s.owner.is_none() || s.owner.unwrap() != user_id);
 
-    #[cfg(feature = "cache_sync")] 
-    state.sync.send(MapType::Sensors, serde_json::to_string(&cache_sync::SensorPurgeEvent{
-        is_sensor_id: false,
-        key: user_id,
-    }).unwrap());
+    #[cfg(feature = "cache_sync")]
+    state.sync.send(
+        MapType::Sensors,
+        serde_json::to_string(&cache_sync::SensorPurgeEvent {
+            is_sensor_id: false,
+            key: user_id,
+        })
+        .unwrap(),
+    );
 }
 
 pub fn purge_all_sensors(state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.sensors.write().unwrap().clear();
 
-    #[cfg(feature = "cache_sync")] 
+    #[cfg(feature = "cache_sync")]
     state.sync.send(MapType::Sensors, "".to_owned());
 }
-
 
 /* ----------------------------------------------- API Keys -------------------------------------------------- */
 
@@ -259,59 +268,83 @@ pub fn purge_api_key(key_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.api_keys.write().unwrap().remove(&key_id);
 
-    #[cfg(feature = "cache_sync")] 
-    state.sync.send(MapType::ApiKeys, serde_json::to_string(&cache_sync::ApiKeyPurgeEvent{
-        is_apikey: true,
-        is_sensor: false,
-        is_user: false,
-        key: key_id,
-    }).unwrap());
+    #[cfg(feature = "cache_sync")]
+    state.sync.send(
+        MapType::ApiKeys,
+        serde_json::to_string(&cache_sync::ApiKeyPurgeEvent {
+            is_apikey: true,
+            is_sensor: false,
+            is_user: false,
+            key: key_id,
+        })
+        .unwrap(),
+    );
 }
 
 pub fn purge_api_keys_for_sensor(sensor_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
-    state.cache.api_keys.write().unwrap().retain(|_, v| v.sensor_id != sensor_id);
+    state
+        .cache
+        .api_keys
+        .write()
+        .unwrap()
+        .retain(|_, v| v.sensor_id != sensor_id);
 
-    #[cfg(feature = "cache_sync")] 
-    state.sync.send(MapType::ApiKeys, serde_json::to_string(&cache_sync::ApiKeyPurgeEvent{
-        is_apikey: false,
-        is_sensor: true,
-        is_user: false,
-        key: sensor_id,
-    }).unwrap());
+    #[cfg(feature = "cache_sync")]
+    state.sync.send(
+        MapType::ApiKeys,
+        serde_json::to_string(&cache_sync::ApiKeyPurgeEvent {
+            is_apikey: false,
+            is_sensor: true,
+            is_user: false,
+            key: sensor_id,
+        })
+        .unwrap(),
+    );
 }
 
 pub fn purge_api_keys_for_user(user_id: Uuid, state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
-    state.cache.api_keys.write().unwrap().retain(|_, v| v.user_id != user_id);
+    state
+        .cache
+        .api_keys
+        .write()
+        .unwrap()
+        .retain(|_, v| v.user_id != user_id);
 
-    #[cfg(feature = "cache_sync")] 
-    state.sync.send(MapType::ApiKeys, serde_json::to_string(&cache_sync::ApiKeyPurgeEvent{
-        is_apikey: false,
-        is_sensor: false,
-        is_user: true,
-        key: user_id,
-    }).unwrap());
+    #[cfg(feature = "cache_sync")]
+    state.sync.send(
+        MapType::ApiKeys,
+        serde_json::to_string(&cache_sync::ApiKeyPurgeEvent {
+            is_apikey: false,
+            is_sensor: false,
+            is_user: true,
+            key: user_id,
+        })
+        .unwrap(),
+    );
 }
 
 pub fn purge_all_keys(state: &AppState) {
     #[cfg(not(feature = "cache_sync"))]
     state.cache.api_keys.write().unwrap().clear();
 
-    #[cfg(feature = "cache_sync")] 
+    #[cfg(feature = "cache_sync")]
     state.sync.send(MapType::ApiKeys, "".to_owned());
 }
-
 
 /* ------------------------------------------------ Tests ------------------------------------------------------------ */
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use sqlx::PgPool;
     use crate::{database::models::role::ROLE_SYSTEM_GUEST, test_utils::tests::create_test_app};
-    
-    #[sqlx::test(migrations = "../migrations", fixtures("../handler/fixtures/users.sql", "../handler/fixtures/roles.sql"))]
+    use sqlx::PgPool;
+
+    #[sqlx::test(
+        migrations = "../migrations",
+        fixtures("../handler/fixtures/users.sql", "../handler/fixtures/roles.sql")
+    )]
     async fn test_role_purge(pool: PgPool) {
         let (_, state) = create_test_app(pool).await;
 
@@ -334,7 +367,5 @@ pub mod tests {
             let r = state.cache.roles.read().unwrap();
             assert!(!r.contains_key(&k));
         }
-
     }
-
 }

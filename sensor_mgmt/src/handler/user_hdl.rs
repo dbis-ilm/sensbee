@@ -1,25 +1,28 @@
 use actix_web::{delete, get, post, web, Responder};
 use crate::database::{role_db, user_db};
-use crate::database::user_db::{is_admin_user, register_user};
+use crate::database::user_db::{is_admin_user, is_root_user, register_user};
 use crate::handler::models::responses::GenericUuidResponse;
 use crate::handler::{main_hdl, policy};
 use crate::authentication::jwt_auth;
 use crate::database::models::user::*;
 use crate::features::cache;
-use crate::handler::models::requests::{RegisterUserRequest,EditUserInfoRequest,EditUserPasswordRequest};
+use crate::handler::models::requests::{RegisterUserRequest,EditUserInfoRequest};
 use crate::state::AppState;
+
+/* ------------------------------------------------ User ------------------------------------------------------------ */
+
+const COMMON_TAG: &str = "Users";
 
 #[utoipa::path(
     get,
     path = "/api/users/list",
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description= "Returns a list of registered users in the system.", body = Vec<UserInfo>),
         (status = 401, description= "Returns an unauthorized error if no valid admin token was provided."),
     ),
     security(("JWT" = [])),
 )]
-
 #[get("/users/list")]
 async fn list_users_handler(state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Only admins can list users
@@ -45,20 +48,20 @@ async fn list_users_handler(state: web::Data<AppState>, jwt: jwt_auth::JwtMiddle
         content = RegisterUserRequest,
         description = "Details of the user to register.",
     ),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description= "Returns the uuid of the created user.", body = GenericUuidResponse),
         (status = 500, description= "Returns an error if the registration failed."),
     )
 )]
-
 #[post("/users/register")]
 async fn register_user_handler(body: web::Json<RegisterUserRequest>, data: web::Data<AppState>) -> impl Responder {
-    let result = register_user(body.into_inner(), false, &data).await;
+    let result = register_user(body.into_inner(), &data).await;
     
     if result.is_err() {
         main_hdl::send_result(&result)
     } else { // Only send user_id back
+        // TODO use generic uuid response here?
         main_hdl::send_result(&Ok::<uuid::Uuid, anyhow::Error>(result.unwrap().id))
     }
 }
@@ -67,7 +70,7 @@ async fn register_user_handler(body: web::Json<RegisterUserRequest>, data: web::
     post,
     path = "/api/users/{id}/edit/verify",
     params( ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string()))),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the verification was successful."),
         (status = 401, description= "Returns an unauthorized error if no valid admin token was provided."),
@@ -75,7 +78,6 @@ async fn register_user_handler(body: web::Json<RegisterUserRequest>, data: web::
     ),
     security(("JWT" = [])),
 )]
-
 #[post("/users/{id}/edit/verify")]
 async fn verify_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Only admins may verify users
@@ -98,7 +100,7 @@ async fn verify_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Dat
     get,
     path = "/api/users/{id}/info",
     params( ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string()))),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns the detailed user info.", body = UserInfo),
         (status = 401, description= "Returns an unauthorized error if no valid token was provided.<br>\
@@ -107,7 +109,6 @@ async fn verify_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Dat
     ),
     security(("JWT" = [])),
 )]
-
 #[get("/users/{id}/info")]
 async fn get_user_info_handler(target_user: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Each user can get its own info, only admins can get info of other users
@@ -135,7 +136,7 @@ async fn get_user_info_handler(target_user: web::Path<uuid::Uuid>, state: web::D
     params( 
         ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string())),
     ),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Information has been updated."),
         (status = 401, description= "Returns an unauthorized error if no valid token was provided.<br>\
@@ -144,7 +145,6 @@ async fn get_user_info_handler(target_user: web::Path<uuid::Uuid>, state: web::D
     ),
     security(("JWT" = [])),
 )]
-
 #[post("/users/{id}/edit/info")]
 async fn edit_user_info_handler(target_user: web::Path<uuid::Uuid>, new_info: web::Json<EditUserInfoRequest>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -165,53 +165,10 @@ async fn edit_user_info_handler(target_user: web::Path<uuid::Uuid>, new_info: we
 }
 
 #[utoipa::path(
-    post,
-    path = "/api/users/{id}/edit/security/password",
-    params( 
-        ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string()))
-    ),
-    request_body(
-        description = "NOTE: If an admin user accesses this endpoint the old password can be left empty. Such a user can change the password of any other user.<br>
-        Any non admin user can update only their own password and they must provide their old password as well.",
-        content(
-            (EditUserPasswordRequest),
-        ),
-    ),
-    tag = "Users",
-    responses(
-        (status = 200, description = "Password has been updated.", body = UserInfo),
-        (status = 401, description= "Returns an unauthorized error if no valid token was provided.<br>\
-        Users may edit their password. Admins may edit the password of any user without providing their current password."),
-        (status = 500, description= "Returns an error if the password couldn't be updated."),
-    ),
-    security(("JWT" = [])),
-)]
-
-#[post("/users/{id}/edit/security/password")]
-async fn edit_user_security_password_handler(target_user: web::Path<uuid::Uuid>, pws: web::Json<EditUserPasswordRequest>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
-
-    let user_id = jwt.user_id;
-    let target_id = target_user.into_inner();
-
-    let check = match user_id.is_some() && user_id.clone().unwrap() == target_id {
-        true => policy::require_login(user_id, &state).await, // Same user - needs login
-        false => policy::require_admin(user_id, &state).await // Different user - needs admin
-    };
-
-    if check.is_some() {
-        return check.unwrap();
-    }
-
-    let result = user_db::update_user_password(user_id.unwrap(), target_id, pws.into_inner(), &state).await;
-    
-    main_hdl::send_result(&result)
-}
-
-#[utoipa::path(
     delete,
     path = "/api/users/{id}/delete",
     params( ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string()))),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok on successful deletion of the user."),
         (status = 401, description= "Returns an unauthorized error if no valid admin token was provided."),
@@ -219,7 +176,6 @@ async fn edit_user_security_password_handler(target_user: web::Path<uuid::Uuid>,
     ),
     security(("JWT" = [])),
 )]
-
 #[delete("/users/{id}/delete")]
 async fn delete_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     // Each user may delete his own account, only admins can delete other users
@@ -235,8 +191,14 @@ async fn delete_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Dat
             
             if is_admin.is_some() { // User is not admin
                 is_admin
-            } else if is_admin_user(target_id, &state).await { // Target user is also admin
-                policy::unauthorized("Admin user can't be removed!".to_string())
+            } else if is_root_user(target_id, &state).await { // If target is root -> we dont allow deletion
+                policy::unauthorized("Root user cant be removed".to_string())
+            } else if is_admin_user(target_id, &state).await {  // if target is admin -> check if requester is root
+                if !is_root_user(user_id.unwrap(), &state).await {
+                    policy::unauthorized("You must be root to remove an admin".to_string())
+                } else {
+                    None
+                }
             } else { // Ok
                 None
             }
@@ -259,7 +221,7 @@ async fn delete_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Dat
         ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string())),
         ("role_id" = String, Path, description = "The id of the role to assign", example = json!(uuid::Uuid::new_v4().to_string())),
     ),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the role was assigned successfully."),
         (status = 401, description= "Returns an unauthorized error if no valid admin token was provided."),
@@ -267,7 +229,6 @@ async fn delete_user_handler(target_user: web::Path<uuid::Uuid>, state: web::Dat
     ),
     security(("JWT" = [])),
 )]
-
 #[post("/users/{id}/role/{role_id}/assign")]
 async fn assign_role_handler(params: web::Path<(uuid::Uuid, uuid::Uuid)>, state: web::Data<AppState>, jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     let user_id = jwt.user_id;
@@ -282,7 +243,17 @@ async fn assign_role_handler(params: web::Path<(uuid::Uuid, uuid::Uuid)>, state:
     let target_user_id = params.0;
     let role_id = params.1;
 
-    let result = role_db::assign_role(target_user_id, role_id, false, &state).await;
+    // This endpoint is not allowed to assign system roles besieds the admin role
+    match cache::request_role(role_id, &state).await {
+        Some(role) => {
+            if role.system && !role.is_admin(){
+                return policy::unauthorized("only admin system role can be assigned".to_string()).unwrap();
+            }
+        },
+        None => (),
+    };
+
+    let result = role_db::assign_role(target_user_id, role_id, is_root_user(user_id.unwrap(), &state).await, &state).await;
 
     main_hdl::send_result(&result)
 }
@@ -294,7 +265,7 @@ async fn assign_role_handler(params: web::Path<(uuid::Uuid, uuid::Uuid)>, state:
         ("id" = String, Path, description = "The uuid of the user", example = json!(uuid::Uuid::new_v4().to_string())),
         ("role_id" = String, Path, description = "The id of the role to remove"),
     ),
-    tag = "Users",
+    tag = COMMON_TAG,
     responses(
         (status = 200, description = "Returns ok if the role was revoked successfully."),
         (status = 401, description= "Returns an unauthorized error if no valid admin token was provided."),
@@ -317,7 +288,17 @@ async fn revoke_role_handler(params: web::Path<(uuid::Uuid, uuid::Uuid)>, state:
     let target_user_id = params.0;
     let role_id = params.1;
 
-    let result = role_db::revoke_role(target_user_id, role_id, false, &state).await;
+    // This endpoint is not allowed to revoke system roles besieds the admin role
+     match cache::request_role(role_id, &state).await {
+        Some(role) => {
+            if role.system && !role.is_admin(){
+                return policy::unauthorized("only admin system role can be revoked".to_string()).unwrap();
+            }
+        },
+        None => (),
+    };
+
+    let result = role_db::revoke_role(target_user_id, role_id, is_root_user(user_id.unwrap(), &state).await, &state).await;
 
     main_hdl::send_result(&result)
 }
@@ -333,12 +314,12 @@ mod tests {
     use serde_json::{json, Value};
     use uuid::Uuid;
     use crate::database::models::api_key::ApiKey;
-    use crate::database::models::role::{ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_USER};
+    use crate::database::models::role::{ROLE_SYSTEM_ADMIN, ROLE_SYSTEM_GUEST, ROLE_SYSTEM_ROOT, ROLE_SYSTEM_USER};
     use crate::database::user_db;
     use crate::database::models::user::UserInfo;
     use crate::features::cache;
     use crate::handler::models::requests::EditUserInfoRequest;
-    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, jane, john, login, test_invalid_auth, TEST_ROLE, TEST_ROLE2, TEST_ROLE_THAT_NOT_EXISTS_BUT_IS_VALID, TEST_SYS_ROLE, TEST_SYS_ROLE2};
+    use crate::test_utils::tests::{anne, create_test_api_keys, create_test_app, create_test_sensors, execute_request, jack, jane, john, login, test_invalid_auth, TEST_ROLE, TEST_ROLE2, TEST_ROLE_THAT_NOT_EXISTS_BUT_IS_VALID, TEST_SYS_ROLE, TEST_SYS_ROLE2};
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
     async fn test_list_users(pool: PgPool) {
@@ -348,7 +329,7 @@ mod tests {
 
         // --- List users as John - Should fail (not admin) ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let _ = execute_request("/api/users/list", Method::GET, None,
                                    None::<Value>, Some(token.clone()),
@@ -401,7 +382,6 @@ mod tests {
         let payload = json!({
             "name": "John Doe",
             "email": john().email,
-            "password": john().password,
         });
 
         let _ = execute_request("/api/users/register", Method::POST, None,
@@ -413,7 +393,6 @@ mod tests {
         let payload = json!({
             "name": "Jim Dim",
             "email": "jim@gmail.com",
-            "password": "MySecret",
         });
 
         let body = execute_request("/api/users/register", Method::POST, None,
@@ -440,26 +419,11 @@ mod tests {
 
         let payload = json!({
             "email": payload["email"],
-            "password": payload["password"],
         });
 
-        let _ = execute_request("/auth/login", Method::POST, None,
+        let _ = execute_request("/auth/dev/login", Method::POST, None,
                                 Some(payload), None,
                                 StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Register new admin user - should work over direct func ---
-
-        let payload = json!({
-            "name": "Jen Den",
-            "email": "jen@gmail.com",
-            "password": "MySecret"
-        });
-        
-        let user_info: RegisterUserRequest = serde_json::from_value(payload).unwrap();
-        
-        let user = register_user(user_info, true, &state).await.unwrap();
-        
-        assert!(is_admin_user(user.id, &state).await);
     }
 
     #[sqlx::test(migrations = "../migrations", fixtures("users"))]
@@ -470,7 +434,7 @@ mod tests {
 
         // --- Verify as John (no admin) - should fail ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
         
         let _ = execute_request(&format!("/api/users/{}/edit/verify", jane().id), Method::POST, None,
                                 None::<Value>, Some(token.clone()),
@@ -505,7 +469,7 @@ mod tests {
 
         // --- Get info of John Doe (with his own login) - should succeed ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let body = execute_request(&format!("/api/users/{}/info", john().id), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
@@ -561,7 +525,7 @@ mod tests {
 
         // --- base case - let a user edit their own information - should work
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
         let body = execute_request(&format!("/api/users/{}/info", john().id), Method::GET, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::OK, &app).await;
@@ -635,92 +599,6 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
-    async fn test_update_user_pw(pool: PgPool){
-        let (app, state) = create_test_app(pool).await;
-
-        // --- make sure that unauthorized calls get a 401
-
-        // NOTE Without these params we get a 400 instead of the expected 401
-        let some_payload = json!({
-            "old": &john().password,
-            "new": "new_pw",
-        });
-        let payload: EditUserPasswordRequest = serde_json::from_value(some_payload.clone()).unwrap();
-        test_invalid_auth(format!("/api/users/{}/edit/security/password", john().id).as_str(), Method::POST, Some(payload), &state, &app).await;
-
-        // --- base case - a user should be able to edit their own password -- should work
-
-        let token = login(&john().email, &john().password, &app).await;
-        let body = execute_request(&format!("/api/users/{}/info", john().id), Method::GET, None,
-                                None::<Value>, Some(token.clone()),
-                                StatusCode::OK, &app).await;
-
-        let base_user: UserInfo = serde_json::from_value(body).unwrap();
-
-        
-        let new_pw = format!("new_{:?}", &john().password);
-        let payload = json!({
-            "old": &john().password,
-            "new": new_pw,
-        });
-        let proposed_user_password_changes: EditUserPasswordRequest = serde_json::from_value(payload.clone()).unwrap();
-        
-        let _ = execute_request(&format!("/api/users/{}/edit/security/password", base_user.id), Method::POST, None,
-                                Some(proposed_user_password_changes.clone()), Some(token.clone()),
-                                StatusCode::OK, &app).await;
-
-        let _ = login(&john().email, &new_pw, &app).await;
-
-        // --- a non admin user tries to edit another user -- should fail
-
-        let _ = execute_request(&format!("/api/users/{}/edit/security/password", &jane().id), Method::POST, None,
-                                Some(proposed_user_password_changes), Some(token.clone()),
-                                StatusCode::UNAUTHORIZED, &app).await;
-        
-        // --- an admin should be able to change the password of any other user without knowing their password -- should work
-
-        role_db::assign_role(john().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make John admin!");
-
-        let new_pw = " a new pw ";
-        let payload = json!({
-            "old": "",
-            "new": new_pw,
-        });
-        let proposed_user_password_changes: EditUserPasswordRequest = serde_json::from_value(payload.clone()).unwrap();
-        
-        let _ = execute_request(&format!("/api/users/{}/edit/security/password", jane().id), Method::POST, None,
-                                Some(proposed_user_password_changes.clone()), Some(token.clone()),
-                                StatusCode::OK, &app).await;
-        
-        let _ = execute_request(&format!("/api/users/{}/edit/verify", jane().id), Method::POST, None,
-                                None::<Value>, Some(token.clone()),
-                                StatusCode::OK, &app).await;
-        
-        // make sure that jane can login with the new pw
-
-        let token = login(&jane().email, &new_pw.trim(), &app).await;
-
-        // --- update password wih an invalid length -- should fail
-        
-        let payload = json!({
-            "old": &jane().password,
-            "new": "less",
-        });
-        let proposed_user_password_changes: EditUserPasswordRequest = serde_json::from_value(payload.clone()).unwrap();
-        
-        let _ = execute_request(&format!("/api/users/{}/edit/security/password", jane().id), Method::POST, None,
-                                Some(proposed_user_password_changes.clone()), Some(token.clone()),
-                                StatusCode::INTERNAL_SERVER_ERROR, &app).await;
-        
-        // --- change pw of a non-existing user -- should fail
-
-        let _ = execute_request(&format!("/api/users/{}/edit/security/password", Uuid::new_v4()), Method::POST, None,
-                                Some(proposed_user_password_changes.clone()), Some(token.clone()),
-                                StatusCode::UNAUTHORIZED, &app).await;
-    }
-
-     
-    #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
     async fn test_delete_user(pool: PgPool) {
         let (app, state) = create_test_app(pool).await;
 
@@ -729,9 +607,9 @@ mod tests {
 
         test_invalid_auth(format!("/api/users/{}/delete", john().id).as_str(), Method::DELETE, None::<Value>, &state, &app).await;
 
-        // --- Delete Anne as John - should fail ---
+        // --- Delete Anne as John while both only have user roles - should fail ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let _ = execute_request(&format!("/api/users/{}/delete", anne().id), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
@@ -760,6 +638,24 @@ mod tests {
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
         
+        // --- Assign John and Jack the root role and delete John as Jack - should fail ---
+
+        role_db::assign_role(john().id, ROLE_SYSTEM_ROOT, true, &state).await.expect("Failed to make John root!");
+        role_db::assign_role(jack().id, ROLE_SYSTEM_ROOT, true, &state).await.expect("Failed to make Jack root!");
+
+        let _ = execute_request(&format!("/api/users/{}/delete", jack().id), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        
+        // --- Revoke root role and assign admin then try delete again - shoud work ---
+
+        role_db::revoke_role(jack().id, ROLE_SYSTEM_ROOT, true, &state).await.expect("Failed to revoke root from Jack!");
+        role_db::assign_role(jack().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Jack admin!");
+
+        let _ = execute_request(&format!("/api/users/{}/delete", jack().id), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::OK, &app).await;
+        
         // --- Delete John Doe (with his own login) - should succeed ---
 
         let _ = execute_request(&format!("/api/users/{}/delete", john().id), Method::DELETE, None,
@@ -775,8 +671,9 @@ mod tests {
         // --- Delete John Doe again with his own login - should fail ---
 
         let _ = execute_request(&format!("/api/users/{}/delete", john().id), Method::DELETE, None,
-                                   None::<Value>, Some(token.clone()),
-                                   StatusCode::UNAUTHORIZED, &app).await;
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        
     }
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
@@ -787,9 +684,23 @@ mod tests {
 
         // --- Try to assign a new role to John as John - Should fail (not admin) ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, TEST_ROLE2), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        
+        // --- Assign any default system role as John - should fail ---
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ROOT), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ADMIN), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_USER), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_GUEST), Method::POST, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -797,7 +708,7 @@ mod tests {
         
         role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
-        let token = login(&anne().email, &anne().password, &app).await;
+        let token = login(&anne(), &state).await;
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, TEST_ROLE2), Method::POST, None,
                                 None::<Value>, Some(token.clone()),
@@ -813,7 +724,22 @@ mod tests {
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, TEST_SYS_ROLE2), Method::POST, None,
                                 None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        
+        // --- Assign any default system role as Anne - should fail ---
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ROOT), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        // internal error as this is a double assignment
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ADMIN), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_USER), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_GUEST), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
         
         // --- Assign a role to John as Anne that he already possess - should fail ---
 
@@ -826,6 +752,25 @@ mod tests {
         let _ = execute_request(&format!("/api/users/{}/role/{}/assign", Uuid::new_v4(), TEST_ROLE2), Method::POST, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
+
+        // --- Assign root role to anne and make john Admin -- shoud work ---
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ROOT, true, &state).await.expect("Failed to make Anne admin!");
+        
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ADMIN), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::OK, &app).await;
+        
+        // --- Assign any other default system role as Anne - should fail ---
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_ROOT), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_USER), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/assign", john().id, ROLE_SYSTEM_GUEST), Method::POST, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+
     }
 
     #[sqlx::test(migrations = "../migrations", fixtures("users", "roles", "user_roles"))]
@@ -840,9 +785,26 @@ mod tests {
 
         // --- Try to revoke a role from John as John - Should fail (not admin) ---
 
-        let token = login(&john().email, &john().password, &app).await;
+        let token = login(&john(), &state).await;
+
+        // --- Revoke the test role as non admin user john - should fail ---
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, TEST_ROLE), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+
+        // --- Revoke any default system role as John - should fail ---
+
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_ROOT), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_ADMIN), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_USER), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_GUEST), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::UNAUTHORIZED, &app).await;
 
@@ -850,7 +812,7 @@ mod tests {
 
         role_db::assign_role(anne().id, ROLE_SYSTEM_ADMIN, true, &state).await.expect("Failed to make Anne admin!");
 
-        let token = login(&anne().email, &anne().password, &app).await;
+        let token = login(&anne(), &state).await;
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, TEST_ROLE_THAT_NOT_EXISTS_BUT_IS_VALID), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
@@ -860,7 +822,22 @@ mod tests {
 
         let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, TEST_SYS_ROLE), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+
+        // --- Revoke any default system role as anne with admin role - should fail ---
+
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", anne().id, ROLE_SYSTEM_ROOT), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", anne().id, ROLE_SYSTEM_ADMIN), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", anne().id, ROLE_SYSTEM_USER), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", anne().id, ROLE_SYSTEM_GUEST), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
 
         // --- Force revoke system role from John and check if his api keys were removed ---
         
@@ -885,5 +862,26 @@ mod tests {
         let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", Uuid::new_v4(), TEST_ROLE), Method::DELETE, None,
                                 None::<Value>, Some(token.clone()),
                                 StatusCode::INTERNAL_SERVER_ERROR, &app).await;
+        
+        // Assign root role and revoke admin - shoud work ---
+
+        role_db::assign_role(anne().id, ROLE_SYSTEM_ROOT, true, &state).await.expect("Failed to make Anne admin!");
+
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_ADMIN), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::OK, &app).await;
+
+        // --- Revoke any other system role - should fail ---
+
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_ROOT), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_USER), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(&format!("/api/users/{}/role/{}/revoke", john().id, ROLE_SYSTEM_GUEST), Method::DELETE, None,
+                                None::<Value>, Some(token.clone()),
+                                StatusCode::UNAUTHORIZED, &app).await;
+
     }
 }

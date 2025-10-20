@@ -1,56 +1,64 @@
-use crate::authentication::{jwt_auth, token, token_cache};
-use crate::handler::models::responses::LoginResponse;
-use actix_web::{get, post, web, HttpResponse, Responder};
-use actix_web::cookie::Cookie;
-use actix_web::cookie::time::Duration as ActixWebDuration;
-use serde_json::json;
-use crate::database::user_db::check_user_login;
-use crate::handler::models::requests::LoginUserRequest;
+use crate::authentication::openid::{list_available_idp, retrieve_user_info};
+use crate::authentication::token::{generate_jwt_token, COOKIE_NAME};
+use crate::authentication::{jwt_auth, token_cache};
+use crate::database::user_db::get_user_by_email;
+use crate::features::config::{get_external_sbmi_host, is_prod_mode, root_user_email};
+use crate::handler::main_hdl;
+use crate::handler::models::responses::{AuthResponse, LoginResponse};
 use crate::state::AppState;
+use actix_web::cookie::time::Duration as ActixWebDuration;
+use actix_web::cookie::Cookie;
+use actix_web::{get, post, web, HttpResponse, Responder};
+use serde_json::json;
+use tracing::error;
+
+const AUTH_COMMON_TAG: &str = "Authentication";
 
 #[utoipa::path(
     post,
-    path = "/auth/login",
-    request_body(
-        content_type = "application/json",
-        content = LoginUserRequest,
-        description = "Credentials of the user to login.",
-    ),
-    tag = "Authentication",
+    path = "/auth/dev/login",
+    tag = AUTH_COMMON_TAG,
     responses(
-        (status = 200, description= "Returns the authentication token.", body = LoginResponse),
-        (status = 401, description= "Returns an unauthorized error if the credentials were invalid."),
+        (status = 200, description= "Returns the authentication token for the root user.", body = LoginResponse),
+        (status = 401, description= "Returns an unauthorized error if the config is not set up correctly."),
     )
 )]
-
-#[post("/login")]
-async fn login_user_handler(body: web::Json<LoginUserRequest>, data: web::Data<AppState>) -> impl Responder {
-    let result = check_user_login(body.into_inner(), &data).await;
-    
-    if let Err(_) = result {
-        return HttpResponse::Unauthorized().json(json!({"error": "Invalid email or password"}));
-    }
-    
-    let user = result.unwrap();
-    
-    if !user.verified {
-        return HttpResponse::Unauthorized().json(json!({"error": "User has not been verified yet"}));
+#[post("/dev/login")]
+async fn login_user_handler(data: web::Data<AppState>) -> impl Responder {
+    // Disabled in prod, shouldnt even be registered?
+    if is_prod_mode(&data.cfg) {
+        return HttpResponse::Unauthorized().json(json!({"error": "feature disabled"}));
     }
 
-    let access_token_details = match token::generate_jwt_token(
-        user.id,
-        data.jwt.max_age,
-        data.jwt.private_key.to_owned(),
-    ) {
-        Ok(token_details) => token_details,
-        Err(e) => {
-            return HttpResponse::BadGateway().json(json!({"error": format_args!("{}", e)}));
+    // In dev mode we return a token for the root user
+    let root_email = match root_user_email(&data) {
+        Some(v) => v,
+        None => return HttpResponse::Unauthorized().json(json!({"error": "no root user set"})),
+    };
+
+    let user = match get_user_by_email(&root_email, &data).await {
+        Ok(v) => match v {
+            Some(u) => u,
+            None => todo!(),
+        },
+        Err(err) => {
+            error!("get_user_by_email failed with {}", err);
+            return HttpResponse::Unauthorized()
+                .json(json!({"error": "internal error while fetching root user"}));
         }
     };
-    
+
+    let access_token_details =
+        match generate_jwt_token(user.id, data.jwt.max_age, &data.jwt.private_key) {
+            Ok(token_details) => token_details,
+            Err(e) => {
+                return HttpResponse::BadGateway().json(json!({"error": format_args!("{}", e)}));
+            }
+        };
+
     let token = access_token_details.token.to_owned().unwrap();
 
-    let cookie = Cookie::build("token", token.clone())
+    let cookie = Cookie::build(COOKIE_NAME, token.clone())
         .path("/")
         .max_age(ActixWebDuration::new(60 * data.jwt.max_age, 0))
         .http_only(true)
@@ -66,109 +74,158 @@ async fn login_user_handler(body: web::Json<LoginUserRequest>, data: web::Data<A
 #[utoipa::path(
     get,
     path = "/auth/logout",
-    tag = "Authentication",
+    tag = AUTH_COMMON_TAG,
     responses(
         (status = 200, description= "Returns ok on successful logout."),
     )
 )]
-
 #[get("/logout")]
 async fn logout_user_handler(jwt: jwt_auth::JwtMiddleware) -> impl Responder {
     if jwt.token_id.is_some() {
         token_cache::unregister_token(jwt.token_id.unwrap());
     }
 
-    let cookie = Cookie::build("token", "")
+    let cookie = Cookie::build(COOKIE_NAME, "")
         .path("/")
         .max_age(ActixWebDuration::new(-1, 0))
         .http_only(true)
         .finish();
 
-    HttpResponse::Ok()
+    HttpResponse::Ok().cookie(cookie).json("{}")
+}
+
+//
+// --- OpenID Connect
+//
+
+const AUTH_OPENID_TAG: &str = "Authentication / OpenID Connect";
+
+#[utoipa::path(
+    get,
+    path = "/auth/openid/list_idps",
+    tag = AUTH_OPENID_TAG,
+    responses(
+        (status = 200, description= "Returns a list of all successfully configured OpenID endpoints."),
+    )
+)]
+#[get("/openid/list_idps")]
+async fn openid_available_auth_handler(data: web::Data<AppState>) -> impl Responder {
+    main_hdl::send_result(&Ok(list_available_idp(&data).await))
+}
+
+#[utoipa::path(
+    get,
+    path = "/auth/openid/callback",
+    tag = AUTH_OPENID_TAG,
+    responses(
+        (status = 200, description= "Called by IDP after authentication."),
+    )
+)]
+#[get("/openid/callback")]
+async fn openid_auth_callback_handler(
+    data: web::Data<AppState>,
+    params: web::Query<AuthResponse>,
+) -> impl Responder {
+    let res = retrieve_user_info(params.into_inner(), &data).await;
+    if let Err(err) = res {
+        error!("retrieve_user_info failed with: {:?}", err);
+        return HttpResponse::Unauthorized().json(json!({"error": "Authentication failed"}));
+    }
+
+    let user = res.unwrap();
+    if !user.verified {
+        return HttpResponse::Unauthorized()
+            .json(json!({"error": "User has not been verified yet"}));
+    }
+
+    let access_token_details =
+        match generate_jwt_token(user.id, data.jwt.max_age, &data.jwt.private_key) {
+            Ok(token_details) => token_details,
+            Err(e) => {
+                return HttpResponse::BadGateway().json(json!({"error": format_args!("{}", e)}));
+            }
+        };
+
+    let token = access_token_details.token.to_owned().unwrap();
+
+    let cookie = Cookie::build(COOKIE_NAME, token.clone())
+        .path("/")
+        .max_age(ActixWebDuration::new(60 * data.jwt.max_age, 0))
+        .http_only(true)
+        .finish();
+
+    token_cache::register_token(access_token_details.token_uuid, access_token_details);
+
+    // TODO this should redirect to the calling SBMI instead of localhost...
+
+    HttpResponse::TemporaryRedirect()
         .cookie(cookie)
-        .json("{}")
+        .insert_header((
+            "Location",
+            format!("{}?jwt={}", get_external_sbmi_host(&data.cfg), token),
+        ))
+        .finish()
 }
 
 /* ------------------------------------------------ Tests ------------------------------------------------------------ */
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::test_utils::tests::{create_test_app, execute_request, john, login};
     use actix_http::Method;
     use actix_web::http::StatusCode;
     use serde_json::Value;
-    use super::*;
     use sqlx::PgPool;
-    use crate::test_utils::tests::{create_test_app, execute_request, jane, john, login};
-
-    #[sqlx::test(migrations = "../migrations", fixtures("users"))]
-    async fn test_login(pool: PgPool) {
-        let (app, _) = create_test_app(pool).await;
-
-        // --- Login with non-existent user - Should fail ---
-
-        let payload = json!({
-            "email": "non@existent.com",
-            "password": "1234",
-        });
-
-        let _ = execute_request("/auth/login", Method::POST, None,
-                                Some(payload), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Login with wrong password - Should fail ---
-
-        let payload = json!({
-            "email": &john().email,
-            "password": "1234",
-        });
-
-        let _ = execute_request("/auth/login", Method::POST, None,
-                                Some(payload), None,
-                                StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Login with non-verified user - Should fail ---
-
-        let payload = json!({
-            "email": &jane().email,
-            "password": jane().password,
-        });
-
-        let _ = execute_request("/auth/login", Method::POST, None,
-                                   Some(payload), None,
-                                   StatusCode::UNAUTHORIZED, &app).await;
-
-        // --- Login with correct credentials - Should succeed ---
-
-        let _ = login(&john().email, &john().password, &app).await;
-    }
 
     #[sqlx::test(migrations = "../migrations", fixtures("users"))]
     async fn test_logout(pool: PgPool) {
-        let (app, _) = create_test_app(pool).await;
-        
+        let (app, state) = create_test_app(pool).await;
+
         // Logout with logged-in user --- Should succeed
-        
-        let token = login(&john().email, &john().password, &app).await;
+
+        let token = login(&john(), &state).await;
         let token_details = token_cache::get_token_by_string(token.to_owned()).unwrap();
 
-        let _ = execute_request("/auth/logout", Method::GET, None,
-                                   None::<Value>, Some(token.clone()),
-                                   StatusCode::OK, &app).await;
-        
+        let _ = execute_request(
+            "/auth/logout",
+            Method::GET,
+            None,
+            None::<Value>,
+            Some(token.clone()),
+            StatusCode::OK,
+            &app,
+        )
+        .await;
+
         // Check if token is removed from cache
-        
+
         assert!(!token_cache::has_token(token_details.token_uuid).0);
 
         // Logout again, should fail since token is invalidated --- Should fail
 
-        let _ = execute_request("/auth/logout", Method::GET, None,
-                                None::<Value>, Some(token),
-                                StatusCode::UNAUTHORIZED, &app).await;
+        let _ = execute_request(
+            "/auth/logout",
+            Method::GET,
+            None,
+            None::<Value>,
+            Some(token),
+            StatusCode::UNAUTHORIZED,
+            &app,
+        )
+        .await;
 
         // Logout again without token --- Should succeed
 
-        let _ = execute_request("/auth/logout", Method::GET, None,
-                                None::<Value>, None,
-                                StatusCode::OK, &app).await;
+        let _ = execute_request(
+            "/auth/logout",
+            Method::GET,
+            None,
+            None::<Value>,
+            None,
+            StatusCode::OK,
+            &app,
+        )
+        .await;
     }
 }

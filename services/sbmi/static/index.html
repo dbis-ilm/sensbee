@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>SensBee Management Interface</title>
+
+  <!-- Tab image -->
+  <link rel="icon" href="img/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+
+  <!-- Progressive Web App -->
+  <link rel="manifest" type="application/json" href="js/pwa/manifest.json" />
+
+  <!-- Third-party libs -->
+
+  <!-- https://getbootstrap.com/docs/5.3 -->
+  <link rel="stylesheet" href="third-party/bs5/5.3/bootstrap.min.css">
+  <script src="third-party/bs5/5.3/bootstrap.min.js"></script>
+
+  <!-- https://icons.getbootstrap.com/ -->
+  <link rel="stylesheet" href="third-party/bs-icons/1.11.3/bootstrap-icons.min.css">
+
+  <!-- https://leafletjs.com/ -->
+  <script src="third-party/leaflet/1.9.4/leaflet.js"></script>
+  <link rel="stylesheet" href="third-party/leaflet/1.9.4/leaflet.css" type="text/css">
+  <!-- Resizer plugin: https://github.com/jjimenezshaw/Leaflet.Control.Resizer -->
+  <script src="third-party/leaflet/plugins/resizer/L.Control.Resizer.js"></script>
+  <link rel="stylesheet" href="third-party/leaflet/plugins/resizer/L.Control.Resizer.css" type="text/css">
+  <!-- ace9 js editor -->
+  <script src="third-party/ace/ace.js"></script>
+  <!-- vis.js -->
+  <script src="third-party/vis-timeline/vis.js"></script>
+
+  <!-- SBMI components -->
+  <script src="js/config.js"></script>
+  <script src="js/helper.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/roles.js"></script>
+  <script src="js/tools/sensors_datachain.js"></script>
+  <script src="js/tools/sensor_data_query_wizard.js"></script>
+  <script src="js/sensors.js"></script>
+  <script src="js/users.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data_transform.js"></script>
+  <script src="js/events.js"></script>
+
+  <script src="js/sbmi.js" defer></script>
+
+  <!-- SBMI theme -->
+  <link rel="stylesheet" href="css/theme-base.css" type="text/css">
+
+</head>
+
+<body>
+
+  <!-- Toast wrapper & template -->
+  <div class="sticky-top" aria-live="polite" aria-atomic="true">
+    <div id="bs5-toast-wrapper" class="toast-container ps-3">
+    </div>
+  </div>
+  <template id="bs5-toast">
+    <div class="toast align-items-center border" role="alert" aria-live="assertive" aria-atomic="true"
+      data-bs-autohide="false">
+      <div class="toast-header p-2 pe-3">
+        <strong class="me-auto bs5-toast-header">Alert</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body">
+        Message missing
+      </div>
+    </div>
+  </template>
+  <!-- End of Toast wrapper & template -->
+
+  <!-- Login Section -->
+  <div id="login-section" class="container mt-5 d-none" style="max-width: 400px;">
+    <div class="">
+        <div class="sbmi-app-name"></div>
+      </div>
+      <hr>
+
+    <div class="card mx-auto" >
+      <ul class="nav nav-tabs bg-body-secondary" id="myTab" role="tablist" hidden>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login-tab-pane" type="button" role="tab" aria-controls="login-tab-pane" aria-selected="true">
+            Authentication
+          </button>
+        </li>
+      </ul>
+
+      <div class="card-body bg-body-tertiary">
+        <div class="tab-content" id="myTabContent">
+          <div class="tab-pane fade show active pb-2" id="login-tab-pane" role="tabpanel" aria-labelledby="login-tab">
+            <div class="collapse mt-1" id="collapseLoginOptions">
+              
+              <div class="card card-body">
+                <h5>Login options</h5>
+                <hr>
+                <div class="mb-3">
+                  <label for="sbmi-loginBaseUrl" class="form-label">
+                    SensBee Backend URL
+                  </label>
+                  <input name="url" type="url" class="form-control" id="sbmi-api-baseUrl" value="" placeholder="">
+                  <div id="baseUrlHelp" class="form-text">
+                    The address under which the SensBee backend can be reached from this browser.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <h5>
+              OpenID Connect
+            </h5>
+            
+            <hr>
+
+            <div id="idps_btns" class="m-auto">
+              Loading ...
+            </div>
+            
+            <div id="dev_access">
+              <hr>
+              <button class="btn btn-secondary w-100" onclick="SBMI.session.tryDevelopmentAccess();">
+                <i class="bi bi-person-badge-fill"></i>&nbsp;&nbsp;Development Access
+              </button>
+            </div>
+           
+            <div id="idps_guest">
+               <hr>
+              <button class="btn btn-secondary w-100" onclick="SBMI.session.asGuest();">
+                Guest Access
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- End of Login Section -->
+
+  <!-- Content Body -->
+  <div id="dashboard-section" class="border-top container-fluid d-none">
+    <div class="row flex-nowrap">
+
+      <div class="col-auto px-0 border-end">
+        <div id="sidebar" class="collapse collapse-horizontal show">
+          <!-- Sidebar content -->
+          <div class="mx-auto p-1">
+            <div class="mb-1">
+              <img src="img/icon-512.png" width="32" height="32">
+              <span id="sbmi-app-name" class="sidebar-full fs-4 sbmi-app-name">SensBee Management Interface</span>
+            </div>
+            <span class="fw-light">v<span id="sbmi-app-version"></span></span>
+          </div>
+
+          <!-- UI Tools -->
+          <div class="mx-auto px-2">
+
+            <hr>
+
+            <div class="sidebar-full w-100">
+              <div class="ms-auto btn-group w-100" role="group" aria-label="Theme switcher">
+                <button type="button" class="btn btn-primary" data-bs-theme-value="auto" aria-pressed="false">
+                  <i class="bi bi-gear-fill"></i>
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-theme-value="light" aria-pressed="false">
+                  <i class="bi bi-brightness-high-fill"></i>
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-theme-value="dark" aria-pressed="false">
+                  <i class="bi bi-moon-fill"></i>
+                </button>
+              </div>
+              <div class="mt-1">
+                <button type="button" class="btn btn-danger" onclick="localStorage.clear();window.location.reload();">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+            </div>
+            <button id="sidebarToggleBtn" class="btn btn-sm" onclick="toggleSidebar()">
+              <i class="bi bi-layout-sidebar"></i>
+            </button>
+          </div>
+          <!-- End of  UI Tools -->
+          
+          <hr>
+
+          <div class="d-flex align-items-start flex-column p-3">
+
+            <!-- User dropdown -->
+            <div class="w-100">
+              <span id="navUserInfo" class="nav-item dropdown d-none"></span>
+              <hr>
+            </div>
+            <!-- End of User dropdown -->
+
+            <!-- Nav -->
+            <div class="">
+              <ul class="nav nav-pills flex-column mb-auto">
+
+                <li id="accordionUsers" class="nav-item m-2">
+                  <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#collapseUsers" aria-expanded="false" aria-controls="collapseUsers">
+                    <i class="bi bi-people-fill"></i><span class="sidebar-full">&nbsp;&nbsp;Users</span>
+                  </button>
+                </li>
+
+                <li id="accordionRoles" class="nav-item m-2">
+                  <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#collapseRoles" aria-expanded="false" aria-controls="collapseRoles">
+                    <i class="bi bi-tags-fill"></i><span class="sidebar-full">&nbsp;&nbsp;Roles</span>
+                  </button>
+                </li>
+
+                <li class="nav-item m-2">
+                  <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#collapseSensors" aria-expanded="false" aria-controls="collapseSensors">
+                    <i class="bi bi-broadcast"></i><span class="sidebar-full">&nbsp;&nbsp;Sensors</span>
+                  </button>
+                </li>
+
+                <li id="accordionDataTransforms" class="nav-item m-2">
+                  <button  type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#collapseDataTransforms" aria-expanded="false" aria-controls="collapseDataTransforms" onclick="SBMI.dataTransformAPI.render();">
+                    <i class="bi bi-envelope-paper"></i><span class="sidebar-full">&nbsp;&nbsp;Data Transformer</span>
+                  </button>
+                </li>
+                
+                <li id="accordionEventHandler" class="nav-item m-2">
+                  <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#collapseEventHandler" aria-expanded="false" aria-controls="collapseEventHandler" onclick="SBMI.eventsAPI.render();">
+                    <i class="bi bi-lightning-charge"></i><span class="sidebar-full">&nbsp;&nbsp;Event Handler</span>
+                  </button>
+                </li>
+
+              </ul>
+            </div>
+            <!-- End of Nav -->
+
+          </div>
+          
+          <!-- End of Sidebar content -->
+        </div>
+      </div>
+
+      <main id="main-accordion" class="col pt-2 bg-body-tertiary" style="position: relative; width: 100%; height: 100vh;pointer-events: none;">
+
+        <!-- Map -->
+        <div id="generalSensorMap" class="" style="position: absolute;top: 0;bottom: 0;left: 0;right: 0;z-index: 0;pointer-events: all;">
+        </div>
+        <!-- End of Map -->
+
+        <!-- All other content -->
+        <div class="me-1 p-2" style="position: absolute; top: 0;left: 0;width: 100%;">
+
+          <!-- Live Events -->
+          <div id="accordionEvents" class="accordion pb-2 d-none" style="pointer-events: visible;">
+            <div class="accordion-item">
+              <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#collapseLogEvents" aria-expanded="false" aria-controls="collapseLogEvents">
+                  <i class="bi bi-clock-history"></i>&nbsp;&nbsp;Live Events
+                </button>
+                <div id="events-connection-state" class="d-flex justify-content-center bg-danger">
+                  <i class="bi bi-wifi-off"></i>&nbsp;&nbsp;Disconnected
+                </div>
+              </h2>
+              <div id="collapseLogEvents" class="accordion-collapse collapse" data-bs-parent="#collapseLogEvents">
+                <div class="d-flex align-items-start">
+                  <div class="nav flex-column nav-pills p-1 me-3" id="v-pills-tab" role="tablist"
+                    aria-orientation="vertical">
+                    <button class="nav-link active" id="v-pills-home-tab" data-bs-toggle="pill"
+                      data-bs-target="#v-pills-home" type="button" role="tab" aria-controls="v-pills-home"
+                      aria-selected="true">
+                      <i class="bi bi-layout-text-sidebar-reverse"></i>
+                    </button>
+                  </div>
+                  <div class="tab-content w-100" id="v-pills-tabContent">
+                    <div class="tab-pane fade show active" id="v-pills-home" role="tabpanel"
+                      aria-labelledby="v-pills-home-tab" tabindex="0">
+                      <div id="logEvents-visualization"></div>
+                      <div id="logEventsWrapper" class="p-2"></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+          <!-- End of Live Events -->
+
+          <!-- Users -->
+          <div id="collapseUsers" class="accordion-collapse collapse" style="pointer-events: visible;" data-bs-parent="#main-accordion">
+            <div class="m-2 p-2 border rounded bg-body-tertiary">
+
+              <h6>User</h6>
+
+              <div class="">
+                <button type="button" class="btn btn-secondary" onclick="SBMI.usersAPI.render();">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#globalModal"
+                  onclick="SBMI.usersAPI.openUserRegister();">
+                  <i class="bi bi-person-add"></i>
+                </button>
+              </div>
+
+              <table class="table table-striped-columns table-bordered mt-3">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>User 🪪</th>
+                    <th>Email</th>
+                    <th>Roles</th>
+                    <th>SysRoles</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body"></tbody>
+              </table>
+
+            </div>
+          </div>
+          <!-- End of Users -->
+
+          <!-- Roles -->
+          <div id="collapseRoles" class="accordion-collapse collapse" style="pointer-events: visible;" data-bs-parent="#main-accordion">
+            <div class="m-2 p-2 border rounded bg-body-tertiary">
+
+              <h6>Roles</h6>
+
+              <div>
+                <button type="button" class="btn btn-secondary" onclick="SBMI.rolesAPI.render();">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#globalModal"
+                  onclick="SBMI.rolesAPI.openCreateRole();">
+                  <i class="bi bi-plus-square"></i>
+                </button>
+              </div>
+
+              <table class="table table-striped-columns table-bordered mt-3">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="roles-table-body"></tbody>
+              </table>
+
+            </div>
+          </div>
+          <!-- End of Roles -->
+
+          <!-- Sensors -->
+          <div id="collapseSensors" class="accordion-collapse collapse" data-bs-parent="#main-accordion">
+            <div class="row" style="pointer-events: none;">
+              <div class="col-8" style="pointer-events: none;"></div>
+              <div class="col-4" style="pointer-events: visible;">
+                <!-- Sensor list -->
+                <div id="sensorList" class="border rounded bg-body-tertiary p-1">
+                  
+                  <button type="button" class="btn btn-secondary" onclick="SBMI.sensorsAPI.render();">
+                    <i class="bi bi-arrow-clockwise"></i>
+                  </button>
+                  <button type="button" class="btn btn-primary" data-bs-toggle="offcanvas" data-bs-target="#offcanvasEnd" aria-controls="offcanvasEnd" onclick="SBMI.sensorsAPI.openSensorCreate();">
+                    <i class="bi bi-plus-square"></i>
+                  </button>
+                  <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#globalModal" onclick="SBMI.sensorsAPI.openQueryWizard();">
+                    <i class="bi bi-code-slash"></i>
+                  </button>
+                  <form class="py-1">
+                    <!-- Filter for sensor name -->
+                    <input type="tex" class="form-control" placeholder="Search..." onkeyup="SBMI.sensorsAPI.filterSensorList(event)">
+                  </form>
+
+                  <table class="table table-striped-columns table-bordered">
+                    <thead>
+                      <tr>
+                        <th>Sensor</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sensor-table-body"></tbody>
+                  </table>
+
+                </div>
+                <!-- End of Sensor list -->
+              </div>
+            </div>
+
+            <!-- Pipeline editor -->
+            <div id="pipelineEditor" class="card pipeline-container m-2" style="pointer-events: visible;" hidden>
+
+              <div class="card-header d-flex justify-content-between">
+                <div>
+                  Data Pipeline Editor
+                </div>
+                <div>
+                  <button type="button" class="btn btn-primary" onclick="SBMI.sensorsAPI.data_chain.saveChain();">
+                    Save
+                  </button>
+                  <button type="button" class="btn btn-secondary" onclick='document.getElementById("pipelineEditor").hidden = true'>
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div class="card-body row">
+
+                <!-- Column 0: Sensor info -->
+                <div id="pE-sensorName" class="col-1 m-auto"></div>
+
+                <!-- Column 1: Input -->
+                <div class="col-4 d-flex flex-column justify-content-center">
+                  <div class="dropdown d-flex justify-content-center">
+                    <button id="pE-inboundDropBtn" class="btn btn-outline-primary rounded-3 p-2" type="button"
+                      data-bs-toggle="dropdown" aria-expanded="false"
+                      onclick="SBMI.sensorsAPI.pipeline.populateInboundDataTransformerDropdown();">
+                      + <i class="bi bi-envelope-paper"></i>&nbsp;&nbsp;Data Transformer
+                      <br>
+                      <span class="fw-light">Inbound</span>
+                    </button>
+                    <ul id="pE-inboundDrop" class="dropdown-menu">
+                      <li><span class="dropdown-item-text fw-light">Available Data Transformer</span></li>
+                      <hr>
+                      <span id="pE-inboundDropContent"></span>
+                    </ul>
+                  </div>
+
+                  <!-- Dynamic input node will be placed here -->
+                  <div id="pE-inboundSetWrapper" class="d-none">
+                    <div class="px-1 d-flex justify-content-center">
+                      <i class="bi bi-envelope-paper"></i>&nbsp;&nbsp;Data Transformer
+                    </div>
+                    <div id="pE-inboundSet" class="border rounded-3 d-flex justify-content-between p-2">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Column 2: SensBee -->
+                <div class="col-1 m-auto">
+                  <i class="bi bi-database-fill"></i>&nbsp;SensBee
+                </div>
+
+                <!-- Column 3: Output Event Handlers -->
+                <div class="col-6" id="outputColumn">
+
+                  <div id="pE-outboundEventHandlerContainer" class="d-flex flex-column"></div>
+
+                  <div class="dropdown">
+                    <button class="btn btn-outline-primary rounded-3" type="button" id="addOutputHandlerBtn"
+                      data-bs-toggle="dropdown" aria-expanded="false"
+                      onclick="SBMI.sensorsAPI.pipeline.populateOutboundEventHandlerDropdown();">
+                      + <i class="bi bi-lightning-charge"></i>&nbsp;&nbsp;Event Handler
+                    </button>
+                    <ul id="pE-outboundHandlerDrop" class="dropdown-menu">
+                      <li><span class="dropdown-item-text fw-light">Available Data Transformer</span></li>
+                      <hr>
+                      <span id="pE-outboundHandlerDropContent"></span>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- End of Pipeline editor -->
+
+          </div>
+          <!-- End of Sensors -->
+
+          <!-- Data Transforms -->
+          <div id="collapseDataTransforms" class="accordion-collapse collapse" style="pointer-events: visible;" data-bs-parent="#main-accordion">
+            <div class="m-2 p-2 border rounded bg-body-tertiary">
+
+              <h6>Data Transformer</h6>
+
+              <div>
+                <button type="button" class="btn btn-secondary" onclick="">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-primary" onclick="SBMI.dataTransformAPI.openDataTransformEdit();">
+                  <i class="bi bi-plus-square"></i>
+                </button>
+              </div>
+
+              <table class="table table-striped-columns table-bordered mt-3">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th>Last update</th>
+                    <th>Version</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="dataTransforms-table-body"></tbody>
+              </table>
+
+              <div id="dataTransformerEditor">
+
+              </div>
+
+            </div>
+          </div>
+          <!-- Enf of Data Transforms -->
+
+          <!-- Event Handler -->
+          <div id="collapseEventHandler" class="accordion-collapse collapse" style="pointer-events: visible;" data-bs-parent="#main-accordion">
+            <div class="m-2 p-2 border rounded bg-body-tertiary">
+
+              <h6>Event Handler</h6>
+
+              <div>
+                <button type="button" class="btn btn-secondary" onclick="SBMI.eventsAPI.render();">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-toggle="offcanvas" data-bs-target="#offcanvasEnd"
+                  aria-controls="offcanvasEnd" onclick="SBMI.eventsAPI.openEventHandlerEdit();">
+                  <i class="bi bi-plus-square"></i>
+                </button>
+              </div>
+
+              <table class="table table-striped-columns table-bordered mt-3">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="eventHandler-table-body"></tbody>
+              </table>
+
+            </div>
+          </div>
+          <!-- Enf of Event Handler -->
+
+        </div>
+        <!-- End of All other content -->
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Placeholder components -->
+  <!-- Modal -->
+  <div id="globalModal" class="modal fade" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h1 class="modal-title fs-5" id="globalModalTitle">
+            Modal title
+          </h1>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div id="globalModalBody" class="modal-body">
+          ...
+        </div>
+        <div id="globalModalFooter" class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button id="globalModalAcceptBtn" type="button" class="btn btn-primary" data-bs-dismiss="modal">Ack</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- End of Modal -->
+  <!-- Offcanvas Bottom -->
+  <div id="offcanvasBottom" class="offcanvas offcanvas-bottom" tabindex="-1">
+    <div class="offcanvas-header">
+      <h5 id="offcanvasBottomHeader" class="offcanvas-title">
+        Offcanvas header
+      </h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div id="offcanvasBottomBody" class="offcanvas-body">
+      Offcanvas body
+    </div>
+  </div>
+  <!-- End of Offcanvas Bottom -->
+  <!-- Offcanvas End -->
+  <div id="offcanvasEnd" class="offcanvas offcanvas-end" tabindex="-1">
+    <div class="offcanvas-header">
+      <h5 id="offcanvasHeader" class="offcanvas-title">
+        Offcanvas header
+      </h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div id="offcanvasBody" class="offcanvas-body">
+      Offcanvas body
+    </div>
+  </div>
+  <!-- End of Offcanvas End -->
+  <!-- End of Placeholder components -->
+</body>
+
+</html>

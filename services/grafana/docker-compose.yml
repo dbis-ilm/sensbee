@@ -1,0 +1,47 @@
+#
+
+services:
+  # For logs
+  grafana-loki:
+    container_name: "Loki"
+    image: grafana/loki:latest
+    command: [ "-config.file=/etc/loki-config.yaml" ]
+    volumes:
+      - "./loki-config.yaml:/etc/loki-config.yaml:ro"
+    networks:
+      - "default"
+      - "otel-net"
+  # For traces
+  grafana-tempo:
+    container_name: "Tempo"
+    image: grafana/tempo:latest
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - "./tempo-config.yaml:/etc/tempo.yaml:ro"
+    networks:
+      - "default"
+      - "otel-net"
+
+  # To query logs/traces
+  grafana:
+    container_name: "Grafana"
+    image: grafana/grafana:latest
+    volumes:
+      - "./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml"
+      - "grafana-data:/var/lib/grafana" 
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_FEATURE_TOGGLES_ENABLE=alertingSimplifiedRouting,alertingQueryAndExpressionsStepMode
+      #- GF_AUTH_BASIC_ENABLED=false
+      - GF_PLUGINS_PREINSTALL=yesoreyeram-infinity-datasource
+    ports:
+      - "3000:3000"
+
+volumes:
+  grafana-data:
+
+networks:
+  otel-net:
+    external: true
+    
